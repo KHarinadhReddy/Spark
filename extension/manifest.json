@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Spark Form Filler",
+  "version": "1.0.0",
+  "description": "Fill forms with your Spark profile. You review every field and approve the final submit.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": ["http://localhost:8000/*", "http://127.0.0.1:8000/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Spark Form Filler",
+    "default_popup": "popup.html"
+  }
+}

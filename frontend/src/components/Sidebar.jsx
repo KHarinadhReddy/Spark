@@ -1,26 +1,48 @@
 import {
   ActivityIcon,
+  BellIcon,
   CheckIcon,
+  ClockIcon,
   MicIcon,
   SparkIcon,
   SunIcon,
   ExternalIcon,
   CalendarIcon,
   MailIcon,
+  InboxIcon,
+  SettingsIcon,
   ShieldIcon,
 } from "../icons";
 
 const NAV = [
   { id: "today", icon: SunIcon, key: "navToday" },
   { id: "chat", icon: MicIcon, key: "navChat" },
+  { id: "inbox", icon: InboxIcon, key: "navInbox" },
+  { id: "deadlines", icon: ClockIcon, key: "navDeadlines" },
   { id: "activity", icon: ActivityIcon, key: "navActivity" },
+  { id: "settings", icon: SettingsIcon, key: "navSettings" },
 ];
+
+const MOBILE_NAV = ["today", "chat", "inbox", "deadlines", "activity"];
 
 const CAPABILITIES = [
   { key: "calendar", icon: CalendarIcon },
   { key: "gmail", icon: MailIcon },
   { key: "drive", icon: ShieldIcon },
 ];
+
+function llmLabel(llm, t) {
+  if (llm === "gemini") return "Gemini Flash";
+  if (llm === "groq") return "Groq Llama";
+  if (llm === "bedrock" || llm === "bedrock-claude") return t.bedrock;
+  return t.localPlanner;
+}
+
+function voiceLabel(voice, t) {
+  if (voice === "elevenlabs") return t.elevenlabs;
+  if (voice === "edge-tts") return "Edge neural";
+  return t.browserVoice;
+}
 
 export function Sidebar({
   t,
@@ -32,6 +54,8 @@ export function Sidebar({
   config,
   onConnect,
   onDisconnect,
+  unread,
+  onNotifications,
 }) {
   const mode = config?.capabilities?.mode || "demo";
   const llm = config?.capabilities?.llm || "local-planner";
@@ -64,10 +88,19 @@ export function Sidebar({
               {item.id === "activity" && pendingCount > 0 && (
                 <span className="nav-badge">{pendingCount}</span>
               )}
+              {item.id === "inbox" && unread > 0 && (
+                <span className="nav-badge soft">{unread}</span>
+              )}
             </button>
           );
         })}
       </nav>
+
+      <button type="button" className="nav-item notif-nav" onClick={onNotifications}>
+        <BellIcon size={18} />
+        <span>{t.notifications}</span>
+        {unread > 0 && <span className="nav-badge soft">{unread}</span>}
+      </button>
 
       <div className="side-section">
         <span className="side-label">{t.workspace}</span>
@@ -102,14 +135,14 @@ export function Sidebar({
           <span className="side-label">{t.llm}</span>
           <span className="meta-value">
             <CheckIcon size={13} />
-            {llm === "bedrock-claude" ? t.bedrock : t.localPlanner}
+            {llmLabel(llm, t)}
           </span>
         </div>
         <div>
           <span className="side-label">{t.voice}</span>
           <span className="meta-value">
             <CheckIcon size={13} />
-            {voice === "elevenlabs" ? t.elevenlabs : t.browserVoice}
+            {voiceLabel(voice, t)}
           </span>
         </div>
       </div>
@@ -150,10 +183,11 @@ export function Sidebar({
   );
 }
 
-export function BottomNav({ t, view, onNavigate, pendingCount }) {
+export function BottomNav({ t, view, onNavigate, pendingCount, unread }) {
+  const items = NAV.filter((item) => MOBILE_NAV.includes(item.id));
   return (
     <nav className="bottom-nav" aria-label="Main">
-      {NAV.map((item) => {
+      {items.map((item) => {
         const Icon = item.icon;
         return (
           <button
@@ -166,6 +200,9 @@ export function BottomNav({ t, view, onNavigate, pendingCount }) {
               <Icon size={20} />
               {item.id === "activity" && pendingCount > 0 && (
                 <span className="nav-badge small">{pendingCount}</span>
+              )}
+              {item.id === "inbox" && unread > 0 && (
+                <span className="nav-badge small soft">{unread}</span>
               )}
             </span>
             <span>{t[item.key]}</span>

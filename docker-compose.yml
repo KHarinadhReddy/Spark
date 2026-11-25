@@ -1,0 +1,110 @@
+# Spark — production stack for Oracle Cloud Always Free (or any Docker host).
+#
+#   1. cp .env.example .env   (fill SPARK_DOMAIN, owner token, Google, AI keys)
+#   2. docker compose up -d --build
+#   3. docker compose logs -f caddy
+#
+# The API and the background worker share one SQLite database on the
+# `spark-data` volume. Caddy terminates HTTPS and is the only public service.
+
+name: spark
+
+x-spark-env: &spark-env
+  SPARK_DATA_DIR: /app/data
+  SPARK_FRONTEND_DIST: /app/frontend/dist
+  SPARK_BACKGROUND_SYNC: "0"
+  TZ: ${SPARK_TIMEZONE:-Asia/Kolkata}
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: spark:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      <<: *spark-env
+    volumes:
+      - spark-data:/app/data
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).read()",
+        ]
+      interval: 30s
+      timeout: 6s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    image: spark:latest
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      <<: *spark-env
+    command: ["python", "-m", "app.worker"]
+    volumes:
+      - spark-data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SPARK_DOMAIN: ${SPARK_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # One-off backup: docker compose --profile tools run --rm backup
+  # Writes spark-backup-<timestamp>.zip into ./backups and keeps the last 14.
+  backup:
+    image: spark:latest
+    profiles: ["tools"]
+    env_file:
+      - .env
+    environment:
+      <<: *spark-env
+    command: ["python", "-m", "app.backup", "--output", "/backup", "--keep", "14"]
+    volumes:
+      - spark-data:/app/data
+      - ./backups:/backup
+    restart: "no"
+
+volumes:
+  spark-data:
+  caddy-data:
+  caddy-config:

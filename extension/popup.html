@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spark Form Filler</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div class="brand">
+        <span class="mark">✦</span>
+        <div>
+          <strong>Spark</strong>
+          <span>Form Filler</span>
+        </div>
+      </div>
+      <button id="rescan" class="icon-btn" title="Rescan this page" aria-label="Rescan this page">⟳</button>
+    </header>
+
+    <main>
+      <section class="page-card">
+        <p id="page-title" class="page-title">Reading the page…</p>
+        <p id="page-url" class="page-url"></p>
+        <div class="page-meta">
+          <span id="field-count" class="pill">0 fields</span>
+          <span id="engine" class="pill soft">Spark profile</span>
+        </div>
+      </section>
+
+      <p id="status" class="status" role="status"></p>
+      <p id="error" class="error" hidden></p>
+
+      <section id="fields" class="fields" aria-label="Form fields"></section>
+
+      <section id="gate" class="gate" hidden>
+        <div class="gate-head">
+          <span class="shield">✓</span>
+          <div>
+            <strong>Approval gate</strong>
+            <p>Nothing is submitted until you tick this box and press Submit.</p>
+          </div>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="reviewed" />
+          <span>I reviewed every filled value on the page.</span>
+        </label>
+        <div class="actions">
+          <button id="fill" class="btn ghost">Fill form</button>
+          <button id="submit" class="btn primary" disabled>Submit form</button>
+        </div>
+        <p id="fill-note" class="hint"></p>
+      </section>
+
+      <details class="settings">
+        <summary>Settings</summary>
+        <label>
+          <span>Spark backend URL</span>
+          <input id="backend-url" type="url" placeholder="https://spark.example.com" />
+        </label>
+        <label>
+          <span>Owner token (optional)</span>
+          <input id="backend-token" type="password" autocomplete="off" placeholder="SPARK_OWNER_TOKEN" />
+        </label>
+        <div class="settings-actions">
+          <button id="save-settings" class="btn subtle">Save</button>
+          <button id="test-backend" class="btn subtle">Test connection</button>
+        </div>
+        <p id="settings-status" class="hint"></p>
+      </details>
+    </main>
+
+    <footer class="foot">
+      <span>You approve. Spark fills.</span>
+      <span>Passwords, OTPs and cards are never filled.</span>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

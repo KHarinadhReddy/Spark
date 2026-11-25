@@ -69,9 +69,9 @@ function speakInBrowser(text, language) {
   });
 }
 
-export async function speakText({ text, language, useElevenLabs }) {
+export async function speakText({ text, language, useElevenLabs, useServerTTS }) {
   stopSpeech();
-  if (useElevenLabs) {
+  if (useServerTTS || useElevenLabs) {
     try {
       const blob = await api.tts(text, language);
       await playAudio(blob);
@@ -83,7 +83,7 @@ export async function speakText({ text, language, useElevenLabs }) {
   await speakInBrowser(text, language);
 }
 
-function transcribeWithElevenLabs({ language, onText, onState, onError }) {
+function transcribeWithServer({ language, onText, onState, onError }) {
   const chunks = [];
   let recorder = null;
   let stream = null;
@@ -103,7 +103,7 @@ function transcribeWithElevenLabs({ language, onText, onState, onError }) {
         onState("transcribing");
         try {
           const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-          const result = await api.stt(blob);
+          const result = await api.stt(blob, language);
           if (result.text) onText(result.text);
         } catch (error) {
           onError(error);
@@ -164,8 +164,9 @@ function transcribeWithBrowser({ language, onText, onState, onError }) {
 }
 
 export function startMic(options) {
-  if (options.mode === "elevenlabs" && navigator.mediaDevices?.getUserMedia) {
-    return transcribeWithElevenLabs(options);
+  const serverMode = options.mode === "server" || options.mode === "elevenlabs";
+  if (serverMode && navigator.mediaDevices?.getUserMedia) {
+    return transcribeWithServer(options);
   }
   return transcribeWithBrowser(options);
 }

@@ -42,3 +42,15 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Android / Gradle
+.gradle/
+.kotlin/
+local.properties
+*.iml
+captures/
+*.jks
+*.keystore
+
+# Spark backups (contain personal data)
+backups/

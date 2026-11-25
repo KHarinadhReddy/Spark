@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Debug builds may talk to a local HTTP backend (10.0.2.2 / LAN IP).
+         Release builds keep Android's default: HTTPS only. -->
+    <application android:usesCleartextTraffic="true" />
+</manifest>

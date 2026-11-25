@@ -228,3 +228,57 @@ export function ExternalIcon(props) {
     </Svg>
   );
 }
+
+export function BellIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+      <path d="M10.5 21a2 2 0 0 0 3 0" />
+    </Svg>
+  );
+}
+
+export function InboxIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3 12h5l2 3h4l2-3h5" />
+      <path d="M5.5 4h13l2.5 8v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6l2.5-8Z" />
+    </Svg>
+  );
+}
+
+export function SettingsIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" />
+    </Svg>
+  );
+}
+
+export function WhatsAppIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M20.5 11.6a8.4 8.4 0 0 1-12.4 7.4L3 21l1.8-5a8.4 8.4 0 1 1 15.7-4.4Z" />
+      <path d="M9 8.2c.3-.6.5-.6.9-.6h.5c.2 0 .4.2.5.5l.6 1.4c.1.3 0 .5-.2.7l-.5.6c-.2.2-.2.4 0 .7.5.9 1.3 1.6 2.3 2.1.3.1.5.1.7-.1l.6-.7c.2-.2.4-.3.7-.2l1.4.7c.3.1.4.3.4.5 0 .7-.3 1.4-.9 1.8-.5.4-1.1.5-1.8.4-1.6-.2-3.4-1.3-4.7-2.6-1.2-1.2-2.1-2.8-2.2-4.1 0-.7.1-1.2.5-1.7Z" />
+    </Svg>
+  );
+}
+
+export function CopyIcon(props) {
+  return (
+    <Svg {...props}>
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+    </Svg>
+  );
+}
+
+export function PhoneIcon(props) {
+  return (
+    <Svg {...props}>
+      <rect x="6" y="2" width="12" height="20" rx="3" />
+      <path d="M11 18h2" />
+    </Svg>
+  );
+}

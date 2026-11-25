@@ -77,6 +77,28 @@ def _pick(language: str, english: str, hindi: str) -> str:
 
 
 @dataclass(slots=True)
+class _StoredBrief:
+    """Adapter so the existing brief/UI can read DB-backed deadlines."""
+
+    subject: str
+    sender: str
+    when: date
+    email_id: str
+    snippet: str
+    flagged: bool = False
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "email_id": self.email_id,
+            "subject": self.subject,
+            "sender": self.sender,
+            "date": self.when.isoformat(),
+            "snippet": self.snippet,
+            "flagged": self.flagged,
+        }
+
+
+@dataclass(slots=True)
 class ChatResult:
     reply: str
     language: str
@@ -108,6 +130,7 @@ class SparkAgent:
         workspace: Any,
         audit: AuditLog,
         llm: BedrockPhraser | None = None,
+        store: Any = None,
     ) -> None:
         self.settings = settings
         self.registry = registry
@@ -115,6 +138,7 @@ class SparkAgent:
         self.workspace = workspace
         self.audit = audit
         self.llm = llm or BedrockPhraser(settings)
+        self.store = store
         try:
             self.tz = ZoneInfo(settings.timezone)
         except Exception:
@@ -180,7 +204,20 @@ class SparkAgent:
         language = language if language in {"en", "hi"} else "en"
         now = now or self.now()
         events = self._events_today(now)
-        deadlines = find_deadlines(self.workspace, now)
+        stored = self.store.list_deadlines(days=45) if self.store else []
+        if stored:
+            deadlines = [
+                _StoredBrief(
+                    subject=deadline.title,
+                    sender=deadline.source,
+                    when=deadline.due_date_value or now.date(),
+                    email_id=deadline.source_id or deadline.id,
+                    snippet=deadline.evidence,
+                )
+                for deadline in stored
+            ]
+        else:
+            deadlines = find_deadlines(self.workspace, now)
         sources = [self._source_event(event) for event in events[:3]] + [
             self._source_email({"id": d.email_id, "subject": d.subject, "from_name": d.sender})
             for d in deadlines[:2]

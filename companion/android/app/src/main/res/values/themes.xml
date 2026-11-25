@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Spark" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/spark_accent</item>
+        <item name="colorPrimaryVariant">@color/spark_accent_dark</item>
+        <item name="colorOnPrimary">#1D0F03</item>
+        <item name="colorSecondary">@color/spark_good</item>
+        <item name="android:colorBackground">@color/spark_bg</item>
+        <item name="android:statusBarColor">@color/spark_bg</item>
+        <item name="android:navigationBarColor">@color/spark_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

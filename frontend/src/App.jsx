@@ -6,11 +6,16 @@ import { Sidebar, BottomNav } from "./components/Sidebar";
 import { TodayView } from "./components/TodayView";
 import { ChatView } from "./components/ChatView";
 import { ActivityView } from "./components/ActivityView";
+import { InboxView } from "./components/InboxView";
+import { DeadlinesView } from "./components/DeadlinesView";
+import { SettingsView } from "./components/SettingsView";
+import { NotificationsPanel } from "./components/NotificationsPanel";
 import { Toast } from "./components/Toast";
-import { SparkIcon, GlobeIcon } from "./icons";
+import { SparkIcon, GlobeIcon, BellIcon, SettingsIcon, ShieldIcon } from "./icons";
 
 const LANG_KEY = "spark.language";
 const VIEW_KEY = "spark.view";
+const VIEWS = ["today", "chat", "inbox", "deadlines", "activity", "settings"];
 
 function initialLanguage() {
   try {
@@ -25,7 +30,7 @@ function initialLanguage() {
 function initialView() {
   try {
     const stored = window.localStorage.getItem(VIEW_KEY);
-    if (["today", "chat", "activity"].includes(stored)) return stored;
+    if (VIEWS.includes(stored)) return stored;
   } catch {
     // ignore
   }
@@ -56,10 +61,25 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [toast, setToast] = useState(null);
   const [ready, setReady] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [inbox, setInbox] = useState([]);
+  const [inboxStats, setInboxStats] = useState({});
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [deadlines, setDeadlines] = useState([]);
+  const [deadlineStatus, setDeadlineStatus] = useState("active");
+  const [deadlinesLoading, setDeadlinesLoading] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unread, setUnread] = useState(0);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState(() =>
+    typeof Notification !== "undefined" ? Notification.permission : "unsupported",
+  );
 
   const micRef = useRef(null);
+  const lastUnreadRef = useRef(0);
   const t = COPY[language];
-  const voiceMode = config?.capabilities?.voice === "elevenlabs" ? "elevenlabs" : "browser";
+  const serverTts = config?.voice?.tts && config.voice.tts !== "browser";
+  const serverStt = config?.voice?.stt && config.voice.stt !== "browser";
 
   const showToast = useCallback((message, tone = "neutral", undoId = null) => {
     setToast({ id: Date.now(), message, tone, undoId });
@@ -122,6 +142,75 @@ export default function App() {
     try {
       const payload = await api.get("/api/config");
       setConfig(payload);
+      setLocked(false);
+      return payload;
+    } catch (error) {
+      if (error?.status === 401) setLocked(true);
+      return null;
+    }
+  }, []);
+
+  const refreshInbox = useCallback(async () => {
+    setInboxLoading(true);
+    try {
+      const payload = await api.get("/api/inbox?limit=100");
+      setInbox(payload.messages || []);
+      setInboxStats(payload.stats || {});
+      return payload;
+    } catch (error) {
+      if (error?.status === 401) {
+        showToast(COPY[initialLanguage()].error, "bad");
+      }
+      return null;
+    } finally {
+      setInboxLoading(false);
+    }
+  }, [showToast]);
+
+  const refreshDeadlines = useCallback(
+    async (status = deadlineStatus) => {
+      setDeadlinesLoading(true);
+      try {
+        const payload = await api.get(`/api/deadlines?status=${status}`);
+        setDeadlines(payload.deadlines || []);
+        return payload;
+      } catch {
+        return null;
+      } finally {
+        setDeadlinesLoading(false);
+      }
+    },
+    [deadlineStatus],
+  );
+
+  const refreshNotifications = useCallback(async () => {
+    try {
+      const payload = await api.get("/api/notifications?limit=60");
+      const items = payload.notifications || [];
+      const count = payload.unread || 0;
+      setNotifications(items);
+      setUnread(count);
+      if (
+        count > lastUnreadRef.current &&
+        lastUnreadRef.current !== 0 &&
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted" &&
+        document.visibilityState !== "visible"
+      ) {
+        const latest = items.find((item) => !item.read);
+        if (latest) {
+          try {
+            new Notification(latest.title, {
+              body: latest.body || "Spark",
+              tag: latest.id,
+              icon: "/icons/icon-192.png",
+            });
+          } catch {
+            // browser refused the notification — the in-app badge still updates
+          }
+        }
+      }
+      lastUnreadRef.current = count;
       return payload;
     } catch {
       return null;
@@ -153,12 +242,22 @@ export default function App() {
         refreshBrief(language),
         refreshActions(),
         refreshAudit(),
+        refreshInbox(),
+        refreshDeadlines(),
+        refreshNotifications(),
       ]);
       if (cancelled) return;
       const params = new URLSearchParams(window.location.search);
       if (params.get("google") === "connected") {
         showToast(COPY[initialLanguage()].googleConnected, "good");
-        await Promise.allSettled([refreshConfig(), refreshBrief(), refreshActions()]);
+        await Promise.allSettled([
+          refreshConfig(),
+          refreshBrief(),
+          refreshActions(),
+          refreshInbox(),
+          refreshDeadlines(),
+          refreshNotifications(),
+        ]);
       }
       if (params.has("google")) {
         params.delete("google");
@@ -178,25 +277,44 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!ready) return undefined;
+    const timer = window.setInterval(() => {
+      refreshNotifications();
+      if (document.visibilityState === "visible") {
+        refreshInbox();
+        refreshDeadlines();
+      }
+    }, 40000);
+    return () => window.clearInterval(timer);
+  }, [ready, refreshDeadlines, refreshInbox, refreshNotifications]);
+
+  useEffect(() => {
     return () => {
       micRef.current?.stop();
       stopSpeech();
     };
   }, []);
 
+  useEffect(() => {
+    if (view === "inbox") refreshInbox();
+    if (view === "deadlines") refreshDeadlines();
+    if (view === "activity") refreshAudit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
   const speak = useCallback(
     async (text, lang = language) => {
       if (!text) return;
       setPlaying(true);
       try {
-        await speakText({ text, language: lang, useElevenLabs: voiceMode === "elevenlabs" });
+        await speakText({ text, language: lang, useServerTTS: serverTts });
       } catch {
         showToast(t.voiceUnsupported, "bad");
       } finally {
         setPlaying(false);
       }
     },
-    [language, showToast, t.voiceUnsupported, voiceMode],
+    [language, serverTts, showToast, t.voiceUnsupported],
   );
 
   const togglePlay = useCallback(() => {
@@ -244,6 +362,7 @@ export default function App() {
         };
         setMessages((prev) => [...prev, assistantMessage]);
         refreshAudit();
+        refreshNotifications();
         if (voice) speak(result.reply, result.language || language);
       } catch {
         setMessages((prev) => [
@@ -260,25 +379,39 @@ export default function App() {
         setThinking(false);
       }
     },
-    [language, mergeActions, refreshAudit, speak, t.error, thinking],
+    [language, mergeActions, refreshAudit, refreshNotifications, speak, t.error, thinking],
   );
 
   const handleScan = useCallback(async () => {
     if (scanning || thinking) return;
     setScanning(true);
     try {
+      if (config?.capabilities?.mode === "live") {
+        await api.post("/api/sync").catch(() => null);
+        await Promise.allSettled([refreshDeadlines("active"), refreshInbox(), refreshNotifications()]);
+      }
       const prompt =
         language === "hi" ? "मेरे ईमेल में डेडलाइन खोजो" : "Find deadlines in my emails";
       await send(prompt, { navigate: true });
     } finally {
       setScanning(false);
     }
-  }, [language, scanning, send, thinking]);
+  }, [
+    config?.capabilities?.mode,
+    language,
+    refreshDeadlines,
+    refreshInbox,
+    refreshNotifications,
+    scanning,
+    send,
+    thinking,
+  ]);
 
   const handleAddDeadline = useCallback(
     async (deadline) => {
+      const id = deadline.id || deadline.email_id;
       try {
-        const result = await api.post(`/api/deadlines/${deadline.email_id}/add`, { language });
+        const result = await api.post(`/api/deadlines/${id}/add`, { language });
         mergeActions([result.action]);
         setPending((prev) =>
           prev.some((action) => action.id === result.action.id)
@@ -293,6 +426,29 @@ export default function App() {
       }
     },
     [language, mergeActions, refreshAudit, showToast, t.error],
+  );
+
+  const handleDeadlineAction = useCallback(
+    async (id, action) => {
+      setActionBusy((prev) => ({ ...prev, [id]: true }));
+      try {
+        await api.post(
+          `/api/deadlines/${id}/${action}`,
+          action === "snooze" ? { days: 1 } : undefined,
+        );
+        showToast(t.saved, "good");
+        await Promise.allSettled([refreshDeadlines(), refreshBrief(), refreshNotifications()]);
+      } catch {
+        showToast(t.error, "bad");
+      } finally {
+        setActionBusy((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
+    },
+    [refreshBrief, refreshDeadlines, refreshNotifications, showToast, t.error, t.saved],
   );
 
   const decide = useCallback(
@@ -348,7 +504,7 @@ export default function App() {
     stopSpeech();
     setPlaying(false);
     const session = startMic({
-      mode: voiceMode,
+      mode: serverStt ? "server" : "browser",
       language,
       onText: (text) => {
         setMic("idle");
@@ -361,7 +517,7 @@ export default function App() {
       },
     });
     micRef.current = session;
-  }, [language, mic, send, showToast, t.voiceUnsupported, voiceMode]);
+  }, [language, mic, send, serverStt, showToast, t.voiceUnsupported]);
 
   const handleLanguage = useCallback(
     (next) => {
@@ -372,32 +528,160 @@ export default function App() {
     [language, refreshBrief],
   );
 
-  const handleConnect = useCallback(() => {
-    window.location.href = "/api/auth/google/start";
-  }, []);
+  const handleConnect = useCallback(async () => {
+    try {
+      const result = await api.get("/api/auth/google/start");
+      if (result?.url) window.location.href = result.url;
+    } catch {
+      showToast(t.error, "bad");
+    }
+  }, [showToast, t.error]);
 
   const handleDisconnect = useCallback(async () => {
     try {
       await api.post("/api/auth/google/disconnect");
-      await Promise.allSettled([refreshConfig(), refreshBrief(), refreshActions()]);
+      await Promise.allSettled([
+        refreshConfig(),
+        refreshBrief(),
+        refreshActions(),
+        refreshInbox(),
+        refreshDeadlines(),
+      ]);
       showToast(language === "hi" ? "Google डिस्कनेक्ट हो गया।" : "Google disconnected.", "neutral");
     } catch {
       showToast(t.error, "bad");
     }
-  }, [language, refreshActions, refreshBrief, refreshConfig, showToast, t.error]);
+  }, [
+    language,
+    refreshActions,
+    refreshBrief,
+    refreshConfig,
+    refreshDeadlines,
+    refreshInbox,
+    showToast,
+    t.error,
+  ]);
 
   const handleRefresh = useCallback(async () => {
-    await Promise.allSettled([refreshConfig(), refreshBrief(), refreshActions(), refreshAudit()]);
-  }, [refreshActions, refreshAudit, refreshBrief, refreshConfig]);
+    await Promise.allSettled([
+      refreshConfig(),
+      refreshBrief(),
+      refreshActions(),
+      refreshAudit(),
+      refreshInbox(),
+      refreshDeadlines(),
+      refreshNotifications(),
+    ]);
+  }, [
+    refreshActions,
+    refreshAudit,
+    refreshBrief,
+    refreshConfig,
+    refreshDeadlines,
+    refreshInbox,
+    refreshNotifications,
+  ]);
 
-  const handleNavigate = useCallback((next) => {
-    setView(next);
-    if (next === "activity") refreshAudit();
-  }, [refreshAudit]);
+  const handleSettingsChanged = useCallback(async () => {
+    await Promise.allSettled([
+      refreshConfig(),
+      refreshBrief(),
+      refreshInbox(),
+      refreshDeadlines(),
+      refreshNotifications(),
+    ]);
+  }, [refreshBrief, refreshConfig, refreshDeadlines, refreshInbox, refreshNotifications]);
+
+  const handleMarkMessageRead = useCallback(async (id) => {
+    try {
+      const result = await api.post(`/api/messages/${id}/read`);
+      setInbox((prev) =>
+        prev.map((message) =>
+          message.id === id ? { ...message, unread: false } : message,
+        ),
+      );
+      if (result.stats) setInboxStats(result.stats);
+    } catch {
+      // leave the unread dot in place if the call failed
+    }
+  }, []);
+
+  const handleMarkNotificationRead = useCallback(async (id) => {
+    try {
+      const result = await api.post(`/api/notifications/${id}/read`);
+      setNotifications((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, read: true } : item)),
+      );
+      setUnread(result.unread ?? 0);
+      lastUnreadRef.current = result.unread ?? 0;
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleReadAll = useCallback(async () => {
+    try {
+      await api.post("/api/notifications/read-all");
+      setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+      setUnread(0);
+      lastUnreadRef.current = 0;
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleOpenNotification = useCallback(
+    (item) => {
+      setNotifOpen(false);
+      if (!item.read) handleMarkNotificationRead(item.id);
+      if (item.kind === "deadline" || item.meta?.deadline_id) {
+        setView("deadlines");
+        refreshDeadlines("active");
+      } else if (item.source === "whatsapp" || item.source === "gmail" || item.kind === "message") {
+        setView("inbox");
+        refreshInbox();
+      }
+    },
+    [handleMarkNotificationRead, refreshDeadlines, refreshInbox],
+  );
+
+  const enableNotifications = useCallback(async () => {
+    if (typeof Notification === "undefined") {
+      showToast(t.voiceUnsupported, "bad");
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === "granted") showToast(t.notificationsOn, "good");
+      else if (permission === "denied") showToast(t.notificationsBlocked, "bad");
+    } catch {
+      showToast(t.notificationsBlocked, "bad");
+    }
+  }, [showToast, t.notificationsBlocked, t.notificationsOn, t.voiceUnsupported]);
+
+  const handleNavigate = useCallback(
+    (next) => {
+      setView(next);
+      if (next === "activity") refreshAudit();
+      if (next === "inbox") refreshInbox();
+      if (next === "deadlines") refreshDeadlines();
+      if (next === "settings") refreshConfig();
+    },
+    [refreshAudit, refreshConfig, refreshDeadlines, refreshInbox],
+  );
+
+  const handleAsk = useCallback(
+    (text) => {
+      setView("chat");
+      send(text);
+    },
+    [send],
+  );
 
   const pendingCount = pending.length;
   const mode = config?.capabilities?.mode || "demo";
-  const profileName = config?.profile?.name || "Harinadh";
+  const profileName = config?.profile?.name || "there";
   const suggestions = useMemo(() => config?.prompts || t.suggestions, [config, t.suggestions]);
 
   return (
@@ -412,6 +696,8 @@ export default function App() {
         config={config}
         onConnect={handleConnect}
         onDisconnect={handleDisconnect}
+        unread={unread}
+        onNotifications={() => setNotifOpen(true)}
       />
 
       <div className="main-column">
@@ -421,10 +707,28 @@ export default function App() {
             <span>Spark</span>
           </button>
           <div className="mobile-topbar-actions">
+            <button
+              type="button"
+              className="icon-btn notif-mobile"
+              onClick={() => setNotifOpen(true)}
+              aria-label={t.notifications}
+            >
+              <BellIcon size={18} />
+              {unread > 0 && <span className="nav-badge small">{unread}</span>}
+            </button>
             <span className={`mode-chip tiny ${mode}`}>
               <span className="dot" />
               {mode === "live" ? t.liveMode : t.demoMode}
             </span>
+            <button
+              type="button"
+              className="icon-btn lang-icon"
+              onClick={() => handleNavigate("settings")}
+              aria-label={t.navSettings}
+              title={t.navSettings}
+            >
+              <SettingsIcon size={17} />
+            </button>
             <button
               type="button"
               className="icon-btn lang-icon"
@@ -439,6 +743,28 @@ export default function App() {
         </header>
 
         <main className="main">
+          {locked && (
+            <div className="flag-banner lock-banner">
+              <span className="flag-icon">
+                <ShieldIcon size={17} />
+              </span>
+              <div>
+                <strong>{language === "hi" ? "Spark लॉक है" : "Spark is locked"}</strong>
+                <p>
+                  {language === "hi"
+                    ? "अपना इनबॉक्स खोलने के लिए .env वाला owner token डालें। यह इसी ब्राउज़र में रहता है।"
+                    : "Add the owner token from your .env file to unlock your inbox. It stays in this browser."}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn subtle"
+                onClick={() => handleNavigate("settings")}
+              >
+                {language === "hi" ? "सेटिंग खोलें" : "Open Settings"}
+              </button>
+            </div>
+          )}
           {view === "today" && (
             <TodayView
               t={t}
@@ -474,6 +800,37 @@ export default function App() {
               onSpeak={speak}
             />
           )}
+          {view === "inbox" && (
+            <InboxView
+              t={t}
+              language={language}
+              messages={inbox}
+              stats={inboxStats}
+              loading={inboxLoading}
+              onRefresh={handleRefresh}
+              onMarkRead={handleMarkMessageRead}
+              onAsk={handleAsk}
+            />
+          )}
+          {view === "deadlines" && (
+            <DeadlinesView
+              t={t}
+              language={language}
+              deadlines={deadlines}
+              loading={deadlinesLoading}
+              status={deadlineStatus}
+              onStatus={(status) => {
+                setDeadlineStatus(status);
+                refreshDeadlines(status);
+              }}
+              onRefresh={() => refreshDeadlines()}
+              onAdd={handleAddDeadline}
+              onComplete={(id) => handleDeadlineAction(id, "complete")}
+              onDismiss={(id) => handleDeadlineAction(id, "dismiss")}
+              onSnooze={(id) => handleDeadlineAction(id, "snooze")}
+              actionBusy={actionBusy}
+            />
+          )}
           {view === "activity" && (
             <ActivityView
               t={t}
@@ -489,10 +846,40 @@ export default function App() {
               onRefresh={handleRefresh}
             />
           )}
+          {view === "settings" && (
+            <SettingsView
+              t={t}
+              language={language}
+              config={config}
+              showToast={showToast}
+              onChanged={handleSettingsChanged}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+              onEnableNotifications={enableNotifications}
+              notificationPermission={notificationPermission}
+            />
+          )}
         </main>
       </div>
 
-      <BottomNav t={t} view={view} onNavigate={handleNavigate} pendingCount={pendingCount} />
+      <BottomNav
+        t={t}
+        view={view}
+        onNavigate={handleNavigate}
+        pendingCount={pendingCount}
+        unread={unread}
+      />
+      <NotificationsPanel
+        t={t}
+        language={language}
+        notifications={notifications}
+        unread={unread}
+        open={notifOpen}
+        onClose={() => setNotifOpen(false)}
+        onRead={handleMarkNotificationRead}
+        onReadAll={handleReadAll}
+        onOpenNotification={handleOpenNotification}
+      />
       <Toast toast={toast} onClose={closeToast} onUndo={handleUndo} language={language} />
 
       {!ready && (

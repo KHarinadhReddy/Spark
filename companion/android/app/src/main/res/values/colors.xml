@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="spark_bg">#0B0B11</color>
+    <color name="spark_surface">#14141E</color>
+    <color name="spark_accent">#F7A34C</color>
+    <color name="spark_accent_dark">#E8732A</color>
+    <color name="spark_text">#F6F1EA</color>
+    <color name="spark_muted">#A8A2B1</color>
+    <color name="spark_good">#6FD7A2</color>
+    <color name="spark_warning">#F1C76B</color>
+    <color name="spark_error">#F47B85</color>
+</resources>

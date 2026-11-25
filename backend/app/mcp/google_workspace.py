@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import threading
 from datetime import datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +41,18 @@ class GoogleTokenStore:
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
         self._state_values: set[str] = set()
+        self._lock = threading.Lock()
+
+    def _write(self, payload: dict[str, Any]) -> None:
+        """Write the token atomically so a crash cannot leave a truncated file."""
+        self.token_path.parent.mkdir(parents=True, exist_ok=True)
+        temp = self.token_path.with_suffix(self.token_path.suffix + ".tmp")
+        temp.write_text(json.dumps(payload), encoding="utf-8")
+        try:
+            os.chmod(temp, 0o600)
+        except OSError:
+            pass
+        os.replace(temp, self.token_path)
 
     @property
     def connected(self) -> bool:
@@ -84,8 +98,7 @@ class GoogleTokenStore:
         payload["expires_at"] = (
             datetime.now(timezone.utc) + timedelta(seconds=int(payload.get("expires_in", 3600)))
         ).isoformat()
-        self.token_path.parent.mkdir(parents=True, exist_ok=True)
-        self.token_path.write_text(json.dumps(payload), encoding="utf-8")
+        self._write(payload)
         return payload
 
     def load(self) -> dict[str, Any]:
@@ -94,13 +107,14 @@ class GoogleTokenStore:
         return json.loads(self.token_path.read_text(encoding="utf-8"))
 
     def access_token(self) -> str:
-        token = self.load()
-        expires_at = token.get("expires_at")
-        if expires_at:
-            expiry = datetime.fromisoformat(expires_at)
-            if expiry - datetime.now(timezone.utc) < timedelta(seconds=60):
-                token = self._refresh(token)
-        return token["access_token"]
+        with self._lock:
+            token = self.load()
+            expires_at = token.get("expires_at")
+            if expires_at:
+                expiry = datetime.fromisoformat(expires_at)
+                if expiry - datetime.now(timezone.utc) < timedelta(seconds=60):
+                    token = self._refresh(token)
+            return token["access_token"]
 
     def _refresh(self, token: dict[str, Any]) -> dict[str, Any]:
         refresh_token = token.get("refresh_token")
@@ -124,7 +138,7 @@ class GoogleTokenStore:
             datetime.now(timezone.utc)
             + timedelta(seconds=int(refreshed.get("expires_in", 3600)))
         ).isoformat()
-        self.token_path.write_text(json.dumps(token), encoding="utf-8")
+        self._write(token)
         return token
 
     def disconnect(self) -> None:
@@ -134,8 +148,9 @@ class GoogleTokenStore:
 class GoogleWorkspace:
     """Live Google Calendar + Gmail + Drive adapter using plain REST + OAuth tokens."""
 
-    def __init__(self, tokens: GoogleTokenStore) -> None:
+    def __init__(self, tokens: GoogleTokenStore, timezone_name: str = "Asia/Kolkata") -> None:
         self.tokens = tokens
+        self.timezone_name = timezone_name
 
     def _client(self) -> httpx.Client:
         return httpx.Client(
@@ -194,8 +209,8 @@ class GoogleWorkspace:
             "summary": summary,
             "description": description,
             "location": location,
-            "start": {"dateTime": start, "timeZone": "Asia/Kolkata"},
-            "end": {"dateTime": end, "timeZone": "Asia/Kolkata"},
+            "start": {"dateTime": start, "timeZone": self.timezone_name},
+            "end": {"dateTime": end, "timeZone": self.timezone_name},
         }
         with self._client() as client:
             response = client.post(
@@ -239,6 +254,78 @@ class GoogleWorkspace:
             emails.append(email)
         return {"emails": emails, "count": len(emails)}
 
+    def list_message_ids(
+        self,
+        query: str = "",
+        limit: int = 50,
+        page_token: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "maxResults": min(max(int(limit), 1), 500),
+            "includeSpamTrash": "false",
+        }
+        if query:
+            params["q"] = query
+        if page_token:
+            params["pageToken"] = page_token
+        with self._client() as client:
+            response = client.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages", params=params
+            )
+        self._error(response)
+        payload = response.json()
+        return {
+            "ids": [item["id"] for item in payload.get("messages", [])],
+            "next_page_token": payload.get("nextPageToken"),
+            "result_size_estimate": payload.get("resultSizeEstimate", 0),
+        }
+
+    def get_message(self, message_id: str) -> dict[str, Any]:
+        return self._fetch_email(message_id, summary_only=False)
+
+    def get_attachment_text(self, message: dict[str, Any], max_bytes: int = 2_000_000) -> str:
+        """Best-effort text extraction from PDF/text attachments on a message payload.
+
+        The caller passes the raw Gmail message payload, not the simplified dict.
+        """
+        import io
+
+        texts: list[str] = []
+
+        def walk(part: dict[str, Any]) -> None:
+            body = part.get("body", {})
+            filename = part.get("filename", "")
+            mime = part.get("mimeType", "")
+            if body.get("attachmentId") and (
+                mime == "application/pdf" or mime.startswith("text/") or filename.lower().endswith(".pdf")
+            ):
+                try:
+                    with self._client() as client:
+                        response = client.get(
+                            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/"
+                            f"{message['id']}/attachments/{body['attachmentId']}"
+                        )
+                    self._error(response)
+                    raw = base64.urlsafe_b64decode(response.json().get("data", "") + "===")
+                    raw = raw[:max_bytes]
+                    if mime == "application/pdf" or filename.lower().endswith(".pdf"):
+                        try:
+                            import pypdf
+
+                            reader = pypdf.PdfReader(io.BytesIO(raw))
+                            texts.append("\n".join(page.extract_text() or "" for page in reader.pages))
+                        except Exception:
+                            texts.append("")
+                    else:
+                        texts.append(raw.decode("utf-8", "ignore"))
+                except Exception:
+                    pass
+            for child in part.get("parts", []):
+                walk(child)
+
+        walk(message.get("payload", {}))
+        return "\n".join(text for text in texts if text).strip()
+
     def _fetch_email(self, email_id: str, summary_only: bool = False) -> dict[str, Any]:
         with self._client() as client:
             response = client.get(
@@ -251,12 +338,14 @@ class GoogleWorkspace:
             item["name"].lower(): item["value"]
             for item in message.get("payload", {}).get("headers", [])
         }
+        sender_email = parseaddr(headers.get("from", ""))[1] or headers.get("from", "")
+        sender_name = parseaddr(headers.get("from", ""))[0] or sender_email
         body = self._extract_body(message.get("payload", {}))
         result = {
             "id": message["id"],
             "thread_id": message.get("threadId", message["id"]),
-            "from": headers.get("from", ""),
-            "from_name": headers.get("from", ""),
+            "from": sender_email,
+            "from_name": sender_name,
             "to": headers.get("to", "me"),
             "subject": headers.get("subject", "(no subject)"),
             "date": self._normalise_date(headers.get("date", "")),

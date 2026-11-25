@@ -1,8 +1,38 @@
-# Spark — Voice-First MCP Student Assistant
+# Spark — your voice-first personal assistant
 
-**wHACKiest 2026 • Track 1 • Team Codex**
+**wHACKiest 2026 · Track 1 · Team Codex**
 
-Spark reads your Calendar, Gmail, and Drive via MCP. It gives you a morning voice brief, scans for deadlines, drafts emails, and adds events — but **every write waits for your explicit approval**. All actions are audited and undoable.
+Spark reads your real Gmail, Google Calendar and Drive, catches deadlines,
+unifies WhatsApp notifications from an Android companion, speaks naturally in
+English and Hindi, and fills forms from a browser extension. It can also make
+calendar events and Gmail drafts — but **every write waits for your explicit
+approval**, is recorded in an audit log, and can be undone.
+
+No seeded messages are shown when Google is connected. Nothing is sent or
+submitted behind your back.
+
+---
+
+## What it does
+
+- **Real Google data** — OAuth with Gmail read + compose, Calendar events and
+  Drive read scopes. No mocked inbox in live mode.
+- **Unified inbox** — Gmail and WhatsApp in one searchable list, with category,
+  priority and “needs action” tags.
+- **Deadline radar** — extracts dates from message text, shows evidence and
+  confidence, and proposes a Calendar reminder that you approve.
+- **WhatsApp without a bridge** — an Android `NotificationListenerService`
+  forwards notifications even when Spark is closed. No unofficial WhatsApp
+  client, no account ban risk, no chat history scraping.
+- **Natural voice** — free Edge neural TTS, Groq Whisper STT, Gemini/Groq
+  planning, with browser speech as the always-available fallback.
+- **Form filling with a real gate** — a Chrome/Edge extension reads the form,
+  matches it to your saved profile, fills it, and only submits after you tick
+  the approval box. Passwords, OTPs, card numbers and files are never filled.
+- **Approval gate + audit + undo** — tool arguments are SHA-256 hashed at
+  proposal time and re-verified before execution.
+- **One-command cloud deploy** — Docker Compose + Caddy on Oracle Cloud Always
+  Free, with HTTPS and nightly SQLite backups.
 
 ---
 
@@ -10,270 +40,345 @@ Spark reads your Calendar, Gmail, and Drive via MCP. It gives you a morning voic
 
 ```mermaid
 flowchart LR
-  subgraph Browser["🖥️ Browser (React PWA)"]
-    UI[Today / Chat / Activity]
-    Voice[Web Speech / ElevenLabs]
-    UI --> Voice
+  subgraph Clients
+    WEB["React PWA<br/>Today · Chat · Inbox · Deadlines"]
+    AND["Android companion<br/>notification listener"]
+    EXT["Chrome extension<br/>form filler"]
   end
 
-  subgraph Backend["⚡ FastAPI on 127.0.0.1:8000"]
-    Agent[SparkAgent<br/>deterministic planner]
-    Registry[MCP Registry<br/>7 tools, 2 write]
-    Gate[ApprovalGate<br/>args-hash + audit]
-    Audit[AuditLog + Undo]
-    Mock[MockWorkspace<br/>seeded student data]
-    Google[GoogleWorkspace<br/>OAuth REST]
-    LLM[BedrockPhraser<br/>Claude on Bedrock]
-    VoiceSvc[ElevenLabs<br/>TTS / STT]
+  subgraph Server["FastAPI + SQLite (Docker)"]
+    API["REST API<br/>owner-token auth"]
+    BRAIN["SparkBrain<br/>Gemini / Groq / local planner"]
+    GATE["ApprovalGate<br/>hash + audit + undo"]
+    STORE[("SQLite<br/>messages · deadlines<br/>actions · notifications")]
+    SYNC["Gmail sync"]
+    REM["Reminder worker"]
+    VOICE["Voice chain<br/>Edge TTS · Groq Whisper"]
+    FORMS["Profile vault<br/>form mapping"]
   end
 
-  UI <-- HTTPS --> Backend
-  Agent --> Registry
-  Registry -. read .-> Mock
-  Registry -. write .-> Gate
-  Gate --> Mock
-  Gate --> Audit
-  Agent --> LLM
-  VoiceSvc --> Voice
-  Mock -. seed .-> data/workspace.json
-  Google -. tokens .-> data/google_token.json
+  GOOGLE["Google APIs<br/>Gmail · Calendar · Drive"]
+  CADDY["Caddy<br/>automatic HTTPS"]
+
+  WEB --> CADDY --> API
+  AND -- "device token" --> API
+  EXT -- "owner token" --> API
+  API --> BRAIN
+  BRAIN --> GATE
+  GATE --> STORE
+  API --> STORE
+  API --> SYNC --> GOOGLE
+  API --> REM
+  API --> VOICE
+  API --> FORMS
 ```
 
-### Data Flow
+### The write path
 
-1. **Voice/Text Input** → `/api/chat` (language auto-detected)
-2. **Planner** classifies intent (`brief`, `deadlines`, `event`, `draft`, `files`, `qa`, `help`)
-3. **Read Tools** run freely: `calendar.list_events`, `gmail.search_emails`, `drive.search_files`
-4. **Write Plans** become **preview cards** via `ApprovalGate.propose()`
-   - Arguments are **SHA-256 hashed** at proposal time
-   - Hash is **re-verified** at approval → tamper-proof
-5. **User taps Approve** → `ApprovalGate.approve()` executes the tool
-6. **Undo** available for 24h via `ApprovalGate.undo()` → logged in audit
-7. **Switching providers** (demo ↔ live Google) expires all pending actions
+1. A read tool may run freely (`calendar.list_events`, `gmail.search_emails`,
+   `drive.search_files`).
+2. A write becomes a **preview card** through `ApprovalGate.propose()`.
+3. The card shows exactly what will change. Arguments are hashed.
+4. You tap **Approve**; the hash is re-checked, then the tool executes.
+5. **Undo** is available for 24 hours and is itself audited.
+6. Web content is treated as data, never instructions. Prompt-injection
+   attempts are flagged and surfaced.
 
-### Security Model
-
-- **Email / Drive / Calendar content is data, never instructions** — scanned for prompt injection (`guardrails.py`)
-- **User requests that try to bypass guardrails are blocked** (`scan_user_request`)
-- **Scoped OAuth**: Calendar events, Gmail read + compose, Drive read only
-- **Approval gate is the only path to side effects** — enforced at registry level
-- **Audit log** captures every read, proposal, decision, execution, undo, and flag
+Gmail is **draft-only**: Spark can create a draft but never send it. Drive is
+read-only.
 
 ---
 
-## Quickstart
+## Quickstart (zero secrets, demo mode)
 
-### Prerequisites
-
-- Python 3.11+
-- Node 20+
-- Git
-
-### Demo Mode (zero secrets)
+Prerequisites: Python 3.11+, Node 20+, Git.
 
 ```bash
-# 1. Clone
 git clone https://github.com/KHarinadhReddy/Spark.git
 cd Spark
 
-# 2. Python backend
 python -m venv .venv
-.venv/Scripts/activate          # Windows
-# source .venv/bin/activate    # macOS/Linux
-pip install -r backend/requirements.txt
-pip install -e backend          # editable install for tests
+# Windows PowerShell:
+.venv\Scripts\Activate.ps1
+# macOS/Linux:
+# source .venv/bin/activate
 
-# 3. Frontend
+pip install -r backend/requirements.txt
+
 cd frontend
 npm install
 npm run build
 cd ..
 
-# 4. Run
-.venv/Scripts/python -m uvicorn app.main:app --reload --port 8000
-# Open http://127.0.0.1:8000
+# Windows PowerShell
+$env:PYTHONPATH = "backend"
+.venv\Scripts\python -m uvicorn app.main:app --reload --port 8000
+
+# macOS/Linux
+# PYTHONPATH=backend .venv/bin/python -m uvicorn app.main:app --reload --port 8000
 ```
 
-The app serves the React build from FastAPI at `/` and the API at `/api/*`.
+Open <http://127.0.0.1:8000>. Demo mode uses the seeded student workspace so
+you can try the approval gate before connecting any account.
 
-### Live Mode (Google + Bedrock + ElevenLabs)
+For live frontend development, run `npm run dev` in `frontend/`; Vite proxies
+`/api` to port 8000.
 
-Create `.env` at repo root:
+---
+
+## Live mode
+
+Copy `.env.example` to `.env` and fill in what you have. The full production
+walkthrough is in **[deploy/oracle.md](deploy/oracle.md)**.
+
+### Google (required for real data)
+
+1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable **Gmail API**, **Google Calendar API**, **Google Drive API**.
+3. Configure the OAuth consent screen:
+   - **Internal** for a Google Workspace account — recommended, long-lived
+     refresh tokens.
+   - **External** for personal Gmail. Add yourself as a test user; testing-mode
+     refresh tokens expire after 7 days until the app is published.
+4. Create an OAuth client of type **Web application** with the redirect URI
+   `http://localhost:8000/api/auth/google/callback` (or your HTTPS domain).
+5. Put the credentials in `.env`:
 
 ```env
-# Google OAuth (Calendar + Gmail + Drive, read + compose)
-GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-secret
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=http://localhost:8000/api/auth/google/callback
-
-# AWS Bedrock (Claude for phrasing grounded answers)
-AWS_REGION=us-east-1
-BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
-
-# ElevenLabs (premium voice)
-ELEVENLABS_API_KEY=your-key
-ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
-ELEVENLABS_TTS_MODEL=eleven_multilingual_v2
-ELEVENLABS_STT_MODEL=scribe_v1
 ```
 
-Then in the UI: **Sidebar → Connect Google** → consent → live data appears.
+Then open Spark → **Settings → Connect Google**.
+
+### Free AI and voice
+
+```env
+GEMINI_API_KEY=...          # primary planner, free tier
+GROQ_API_KEY=...            # fallback planner + Whisper STT
+SPARK_EDGE_TTS=1            # free neural TTS, no key
+```
+
+Optional premium voice: set `ELEVENLABS_API_KEY` and it takes priority over
+Edge TTS. If no model key exists, Spark still works with a deterministic local
+planner and the browser voice.
+
+### Lock it down
+
+On any public URL set a strong owner token:
+
+```bash
+openssl rand -hex 32
+```
+
+```env
+SPARK_OWNER_TOKEN=<the generated value>
+```
+
+Paste the same token into **Settings → Access** in the web app and into the
+browser extension. All API routes except `/api/health`, the Google OAuth
+callback and device-token companion routes then require `x-spark-token` (or a
+Bearer token). Starting Google OAuth also requires the owner token.
 
 ---
 
-## Demo Script (4 minutes)
+## Cloud deployment (Oracle Always Free)
 
-| Time | Action | What the judges see |
-|------|--------|---------------------|
-| 0:00 | Open `http://127.0.0.1:8000` | Splash → Today view with 3 classes, 6 deadlines, orange accent |
-| 0:15 | Tap **Play voice brief** | ElevenLabs / browser voice reads the morning brief in English |
-| 0:30 | Switch to **हिं** (top-right) → tap **ब्रीफ़ सुनें** | Same brief in Hindi (Devanagari) |
-| 0:45 | Tap **Scan inbox** | Chat opens, 4 calendar cards appear (library, mess, fee, exam) |
-| 1:10 | Tap **Approve** on “Overdue library books” | Card flips to ✅ Executed, undo button appears |
-| 1:30 | Open **Activity** tab → tap **Undo** | Event disappears from calendar, audit log shows `action.undone` |
-| 1:50 | Ask “Draft a reminder to accounts office about the fee” | Gmail draft card appears; approve → saves to Drafts (never sends) |
-| 2:10 | Ask “What’s on my calendar today?” | Reads from MCP, cites sources as chips |
-| 2:30 | Click a **flagged email** (phishing) | Banner: “Untrusted instructions ignored — treated as data” |
-| 2:45 | Sidebar → **Connect Google** (if keys set) | Live Calendar/Gmail/Drive; pending cards expire with notice |
-| 3:00 | Show **audit log** timeline | Every read, proposal, approve, reject, undo, flag — timestamped |
+The repo ships:
+
+| File | Purpose |
+|---|---|
+| `Dockerfile` | Frontend build + Python runtime |
+| `docker-compose.yml` | API + worker + Caddy + backup service |
+| `Caddyfile` | Automatic HTTPS reverse proxy |
+| `deploy/oracle.md` | Step-by-step VM, DNS, OAuth, backup and restore guide |
+
+```bash
+cp .env.example .env    # fill SPARK_DOMAIN, owner token, Google + AI keys
+docker compose up -d --build
+docker compose logs -f caddy api worker
+```
+
+The API never publishes port 8000; Caddy is the only public entry point. The
+API and background worker share a named SQLite volume, and `docker compose
+--profile tools run --rm backup` produces a consistent zip snapshot.
 
 ---
 
-## API Reference
+## Chrome / Edge form filler
+
+See **[extension/README.md](extension/README.md)**.
+
+1. Open `chrome://extensions` (or `edge://extensions`), enable **Developer
+   mode**, and choose **Load unpacked** → this repo's `extension/` folder.
+2. In the extension's **Settings**, set the backend URL and owner token.
+3. Open a form, review the matched values, click **Fill form**, check the page,
+   tick the approval box, then **Submit form**.
+
+The backend rejects submission with HTTP 403 unless `approved: true`, and logs
+every analyzed and submitted form. Sensitive fields (passwords, OTPs, CAPTCHA,
+payment data, file uploads) are never filled. A page ultimately controls its
+own submit action, so always review before approving.
+
+---
+
+## Android WhatsApp companion
+
+See **[companion/android/README.md](companion/android/README.md)**.
+
+```bash
+cd companion/android
+./gradlew assembleDebug        # Windows: .\gradlew.bat assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+1. In Spark: **Settings → WhatsApp companion → Pair a device**.
+2. Paste the backend URL and one-time device token into the app.
+3. Grant **Notification access** to Spark Companion.
+4. Send a WhatsApp message; it appears in Spark's Inbox within seconds.
+
+The companion forwards notification text only. It cannot read old chats and
+cannot send messages. WhatsApp chat exports can be imported separately from
+Settings for history.
+
+---
+
+## API reference
+
+All routes are under `/api`. When `SPARK_OWNER_TOKEN` is set, send
+`x-spark-token: <token>` or `Authorization: Bearer <token>`. Device routes use
+`x-spark-device: <pairing token>`.
 
 | Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Mode, capabilities, pending count, profile |
-| `/api/config` | GET | Tools catalog, prompts, Google status |
-| `/api/brief?language=en\|hi` | GET | Morning brief + today's events + deadlines |
-| `/api/deadlines?language=en\|hi` | GET | All detected deadlines + pending cards |
-| `/api/deadlines/{email_id}/add` | POST | Propose calendar event for a deadline |
-| `/api/chat` | POST | `{message, language?}` → intent, reply, cards, sources, flags |
-| `/api/actions` | GET | Pending + recent actions |
-| `/api/actions/{id}` | GET | Action detail |
-| `/api/actions/{id}/approve` | POST | Execute approved write |
-| `/api/actions/{id}/reject` | POST | Dismiss pending |
-| `/api/actions/{id}/undo` | POST | Reverse executed write |
-| `/api/audit?limit=100` | GET | Full audit trail |
-| `/api/auth/google/start` | GET | Redirect to Google OAuth |
-| `/api/auth/google/callback` | GET | OAuth callback (sets token, refreshes workspace) |
-| `/api/auth/google/disconnect` | POST | Revoke token, back to demo |
-| `/api/voice/tts` | POST | `{text, language}` → MP3 (ElevenLabs) |
-| `/api/voice/stt` | POST | Audio blob → `{text}` (ElevenLabs) |
+|---|---|---|
+| `/health` | GET | Mode, capabilities, inbox counts (public) |
+| `/config` | GET | Tools, prompts, Google/AI/voice status |
+| `/chat` | POST | `{message, language}` → reply, cards, sources, flags |
+| `/brief?language=en\|hi` | GET | Morning brief, events, deadlines |
+| `/inbox` | GET | Unified messages, filters, stats |
+| `/messages/{id}` | GET | Full message body |
+| `/messages/{id}/read` | POST | Mark read |
+| `/notifications` | GET | In-app notification list |
+| `/notifications/count` | GET | Unread count |
+| `/notifications/{id}/read` | POST | Mark one read |
+| `/notifications/read-all` | POST | Mark all read |
+| `/deadlines?status=active\|completed\|all` | GET | Stored deadlines |
+| `/deadlines/{id}/add` | POST | Propose a Calendar event |
+| `/deadlines/{id}/complete\|dismiss\|snooze` | POST | Deadline state |
+| `/actions` | GET | Pending + recent actions |
+| `/actions/{id}/approve\|reject\|undo` | POST | Decide an action |
+| `/audit?limit=100` | GET | Timestamped audit trail |
+| `/sync` | POST | Pull Gmail now |
+| `/sync/status` | GET | Last sync, errors, worker state |
+| `/reminders` / `/reminders/run` | GET/POST | Reminder state / materialize due reminders |
+| `/profile` | GET/PUT | Saved form profile |
+| `/companion/pair` | POST | Create a device pairing token |
+| `/companion/me` | GET | Validate a device token |
+| `/companion/devices` | GET | List paired devices |
+| `/companion/devices/{id}` | DELETE | Revoke a device |
+| `/companion/notifications` | POST | Android notification ingest |
+| `/companion/import` | POST | Device-authenticated chat export |
+| `/whatsapp/import` | POST | Owner-authenticated chat export |
+| `/forms/analyze` | POST | Match form fields to the profile |
+| `/forms/submit` | POST | Log an approved submission (`approved: true`) |
+| `/forms/stats` | GET | Forms analyzed / submitted |
+| `/auth/google/start` | GET | Return the Google consent URL (owner only) |
+| `/auth/google/callback` | GET | OAuth callback |
+| `/auth/google/status` | GET | Configured / connected |
+| `/auth/google/disconnect` | POST | Revoke local token |
+| `/voice/status` | GET | Active TTS/STT providers |
+| `/voice/tts` | POST | Server TTS → audio |
+| `/voice/stt` | POST | Audio → text |
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 Spark/
 ├── backend/
 │   ├── app/
-│   │   ├── agent/          # SparkAgent, deadlines, BedrockPhraser
-│   │   ├── core/           # db, audit, approval, guardrails
-│   │   ├── mcp/            # Registry, tools, MockWorkspace, GoogleWorkspace
-│   │   ├── seed/           # workspace.json (9 emails, 8 events, 5 files)
-│   │   ├── voice.py        # ElevenLabs client
-│   │   ├── config.py       # Settings, capabilities, mode detection
-│   │   └── main.py         # FastAPI factory, all routes
-│   ├── tests/              # 24 tests (gate, api, deadlines, guardrails)
+│   │   ├── agent/          # brain, planner, Gmail sync, extractor, companion, reminders
+│   │   ├── core/           # SQLite, unified store, approval gate, audit, guardrails
+│   │   ├── mcp/            # registry, read/write tools, demo + Google workspaces
+│   │   ├── backup.py       # consistent SQLite + token backup
+│   │   ├── forms.py        # profile vault and form mapping
+│   │   ├── voice.py        # Edge TTS, Groq Whisper, ElevenLabs
+│   │   ├── worker.py       # standalone background worker process
+│   │   ├── config.py
+│   │   └── main.py
 │   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── components/     # TodayView, ChatView, ActivityView, ActionCard, ...
-│   │   ├── api.js          # fetch wrapper
-│   │   ├── voice.js        # Web Speech + ElevenLabs
-│   │   ├── i18n.js         # EN / HI copy
-│   │   ├── icons.jsx       # 25 inline SVGs
-│   │   ├── App.jsx         # State, orchestration, toasts
-│   │   ├── main.jsx        # React root + SW registration
-│   │   └── styles.css      # ~750 lines, dark/orange, responsive, PWA-ready
-│   ├── public/
-│   │   ├── icon.svg
-│   │   ├── manifest.webmanifest
-│   │   ├── sw.js           # Service worker (shell cache)
-│   │   └── icons/          # 192, 512, maskable PNGs
-│   ├── index.html
-│   ├── vite.config.js
-│   └── package.json
-├── .github/workflows/ci.yml
+├── companion/android/      # notification listener app (Kotlin)
+├── deploy/oracle.md        # production deployment guide
+├── extension/              # Manifest V3 form filler
+├── frontend/               # React + Vite PWA
+├── tests/                  # backend test suite
+├── Caddyfile
+├── docker-compose.yml
 ├── Dockerfile
-├── .env.example
-├── .gitignore
-└── README.md
+└── .env.example
 ```
 
 ---
 
-## Testing
+## Tests
 
 ```bash
-# Backend tests (24 passing)
-cd Spark
-$env:PYTHONPATH="backend"          # Windows PowerShell
-# export PYTHONPATH=backend        # macOS/Linux
-.venv/Scripts/python -m pytest tests -q
+# from the repo root
+PYTHONPATH=backend .venv/bin/python -m pytest tests -q      # macOS/Linux
+$env:PYTHONPATH="backend"; .venv\Scripts\python -m pytest tests -q   # Windows
 ```
 
----
-
-## CI / CD
-
-`.github/workflows/ci.yml` runs on every push:
-
-1. **Backend** — install deps, run pytest
-2. **Frontend** — `npm ci`, `npm run build`, verify `dist/` exists
-3. **Docker** — build image, smoke-test `/api/health`
+Coverage includes the approval gate, hash tamper checks, undo, guardrails,
+adapters, unified store de-duplication, deadline extraction, companion ingest
+and export import, form approval, inbox/notification endpoints, voice fallback
+and the local planner. CI also builds the frontend, the Android APK and the
+Docker image.
 
 ---
 
-## Deploy (Docker)
+## Honest limits
 
-```bash
-# Build
-docker build -t spark:latest .
-
-# Run (demo mode)
-docker run -d -p 8000:8000 \
-  -v $(pwd)/data:/app/data \
-  spark:latest
-
-# Live mode: add env vars
-docker run -d -p 8000:8000 \
-  -e GOOGLE_CLIENT_ID=... \
-  -e GOOGLE_CLIENT_SECRET=... \
-  -e AWS_REGION=us-east-1 \
-  -e BEDROCK_MODEL_ID=... \
-  -e ELEVENLABS_API_KEY=... \
-  -v $(pwd)/data:/app/data \
-  spark:latest
-```
+- **WhatsApp** is notification-based. Spark sees only what Android notifies,
+  never full history, and cannot reply. This is deliberate: unofficial WhatsApp
+  bridges violate WhatsApp's terms.
+- **Google OAuth** in External/Testing mode issues refresh tokens that expire
+  after 7 days. Use Workspace Internal OAuth or publish the app for a
+  long-lived connection.
+- **Form submission** is approved by a human in the extension. The backend
+  records the approval, but a website still controls whether it accepts the
+  submission.
+- **Voice quality** depends on the provider. Edge TTS is free and good but not
+  as expressive as ElevenLabs; browser voices vary by OS.
+- **Free tiers** change. Gemini, Groq and Oracle Always Free can be rate-limited
+  or unavailable; Spark falls back to the local planner and browser voice.
+- **Single user by design.** SQLite and the owner token assume one person. Do
+  not scale the API to multiple replicas.
+- **Backups contain personal data**, including the Google token. Protect them.
 
 ---
 
-## Security Notes
+## Security
 
-- **No secrets in repo** — use `.env` (gitignored)
-- **Google tokens stored server-side only** (`data/google_token.json`)
-- **Bedrock / ElevenLabs keys never leave the backend**
-- **Approval gate arguments are hashed** — prevents post-preview tampering
-- **Prompt injection in emails is detected and surfaced, never acted on**
-- **Switching demo ↔ live expires all pending actions** (audit logged)
+- OAuth tokens stay server-side; API keys never reach the browser.
+- Write actions are hashed at proposal time and re-hashed at approval.
+- Google scopes are minimal: read-only Drive, draft-only Gmail, Calendar events.
+- Prompt-injection attempts in email/WhatsApp text are detected and displayed
+  as untrusted content.
+- Owner token locks every sensitive route; companion devices have revocable
+  per-device tokens.
+- Caddy enforces HTTPS, HSTS and basic security headers.
+- No secrets are committed; `.env`, SQLite files, tokens and backups are
+  gitignored.
 
 ---
 
 ## Credits
 
-**Team Codex** — wHACKiest 2026 Track 1 (Make MCP Matter)
+**Team Codex** — wHACKiest 2026, Track 1 (Make MCP Matter).
 
-- MCP-style tool registry with read/write split
-- Deterministic planner + optional Bedrock phrasing
-- Approval gate with hash verification + undo
-- Hindi + English voice (browser + ElevenLabs)
-- PWA: offline shell, installable, responsive ≤ 860px
-
----
-
-## License
+Built with FastAPI, SQLite, React/Vite, Docker, Caddy, Google Workspace APIs,
+Gemini, Groq, Edge TTS, Android and the Chrome Extensions platform.
 
 MIT — hackathon project, use freely.

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Spark Companion</string>
+    <string name="listener_label">Spark WhatsApp notifications</string>
+    <string name="hero_title">Spark Companion</string>
+    <string name="hero_sub">Forward WhatsApp notifications to Spark, even when the app is closed. Spark never sends WhatsApp messages.</string>
+    <string name="backend_label">Spark backend URL</string>
+    <string name="backend_hint">https://spark.example.com</string>
+    <string name="token_label">Device token</string>
+    <string name="token_hint">Paste the token from Spark → Settings → WhatsApp companion</string>
+    <string name="save">Save</string>
+    <string name="test">Test connection</string>
+    <string name="open_access">Open notification access</string>
+    <string name="status_checking">Checking…</string>
+    <string name="status_access_missing">Notification access is off. Tap “Open notification access”, find Spark Companion, and allow it.</string>
+    <string name="status_access_on">Notification access is on.</string>
+    <string name="status_ready">Connected to Spark.</string>
+    <string name="status_saved">Saved.</string>
+    <string name="status_need_config">Add the backend URL and device token first.</string>
+    <string name="status_error">Could not reach Spark: %1$s</string>
+    <string name="privacy_note">Spark sees WhatsApp message titles and text from notifications. It does not read chat history, and it cannot send messages. You can revoke access in Android Settings or revoke this device in Spark.</string>
+</resources>
