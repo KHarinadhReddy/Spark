@@ -194,7 +194,11 @@ class LLMClient:
             try:
                 with httpx.Client(timeout=timeout) as client:
                     response = client.post(url, headers=headers, json=payload, params=params)
-                if response.status_code in {429, 500, 502, 503, 504}:
+                if response.status_code == 429:
+                    # Quota exhausted — do not waste time retrying; fall through to the next provider/model.
+                    last_error = LLMError(f"LLM {response.status_code}: {response.text[:200]}")
+                    break
+                if response.status_code in {500, 502, 503, 504}:
                     backoff = 2.0 * (2 ** attempt) + 1.0
                     time.sleep(backoff)
                     last_error = LLMError(f"LLM {response.status_code}: {response.text[:200]}")
