@@ -771,12 +771,48 @@ a {
 }
 
 .lock-banner {
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 18px;
 }
 
 .lock-banner .btn {
   flex: none;
+}
+
+.lock-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.lock-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.lock-form input {
+  flex: 1;
+  min-width: 180px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  outline: 0;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.lock-form input:focus {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px rgba(247, 163, 76, 0.07);
+}
+
+.lock-error {
+  margin: 7px 0 0;
+  color: var(--bad);
+  font-size: 12px;
 }
 
 .flag-icon {

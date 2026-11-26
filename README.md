@@ -62,7 +62,7 @@ flowchart LR
 
   WEB --> CADDY --> API
   AND -- "device token" --> API
-  EXT -- "owner token" --> API
+  EXT -- "access password" --> API
   API --> BRAIN
   BRAIN --> GATE
   GATE --> STORE
@@ -166,7 +166,7 @@ planner and the browser voice.
 
 ### Lock it down
 
-On any public URL set a strong owner token:
+On any public URL set a strong access password:
 
 ```bash
 openssl rand -hex 32
@@ -179,7 +179,7 @@ SPARK_OWNER_TOKEN=<the generated value>
 Paste the same token into **Settings → Access** in the web app and into the
 browser extension. All API routes except `/api/health`, the Google OAuth
 callback and device-token companion routes then require `x-spark-token` (or a
-Bearer token). Starting Google OAuth also requires the owner token.
+Bearer token). Starting Google OAuth also requires the access password.
 
 ---
 
@@ -212,7 +212,7 @@ See **[extension/README.md](extension/README.md)**.
 
 1. Open `chrome://extensions` (or `edge://extensions`), enable **Developer
    mode**, and choose **Load unpacked** → this repo's `extension/` folder.
-2. In the extension's **Settings**, set the backend URL and owner token.
+2. In the extension's **Settings**, set the backend URL and access password.
 3. Open a form, review the matched values, click **Fill form**, check the page,
    tick the approval box, then **Submit form**.
 
@@ -353,7 +353,7 @@ Docker image.
   as expressive as ElevenLabs; browser voices vary by OS.
 - **Free tiers** change. Gemini, Groq and Oracle Always Free can be rate-limited
   or unavailable; Spark falls back to the local planner and browser voice.
-- **Single user by design.** SQLite and the owner token assume one person. Do
+- **Single user by design.** SQLite and the access password assume one person. Do
   not scale the API to multiple replicas.
 - **Backups contain personal data**, including the Google token. Protect them.
 
@@ -366,7 +366,7 @@ Docker image.
 - Google scopes are minimal: read-only Drive, draft-only Gmail, Calendar events.
 - Prompt-injection attempts in email/WhatsApp text are detected and displayed
   as untrusted content.
-- Owner token locks every sensitive route; companion devices have revocable
+- The access password locks every sensitive route; companion devices have revocable
   per-device tokens.
 - Caddy enforces HTTPS, HSTS and basic security headers.
 - No secrets are committed; `.env`, SQLite files, tokens and backups are

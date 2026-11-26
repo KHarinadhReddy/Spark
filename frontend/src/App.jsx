@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "./api";
+import { api, setOwnerToken } from "./api";
 import { COPY } from "./i18n";
 import { speakText, startMic, stopSpeech } from "./voice";
 import { Sidebar, BottomNav } from "./components/Sidebar";
@@ -62,6 +62,9 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [ready, setReady] = useState(false);
   const [locked, setLocked] = useState(false);
+  const [unlock, setUnlock] = useState("");
+  const [unlockError, setUnlockError] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
   const [inbox, setInbox] = useState([]);
   const [inboxStats, setInboxStats] = useState({});
   const [inboxLoading, setInboxLoading] = useState(false);
@@ -562,6 +565,49 @@ export default function App() {
     t.error,
   ]);
 
+  const handleUnlock = useCallback(
+    async (event) => {
+      event.preventDefault();
+      const password = unlock.trim();
+      if (!password) return;
+      setUnlocking(true);
+      setUnlockError("");
+      setOwnerToken(password);
+      try {
+        const payload = await api.get("/api/config");
+        setConfig(payload);
+        setLocked(false);
+        setUnlock("");
+        showToast(t.unlocked, "good");
+        await Promise.allSettled([
+          refreshBrief(language),
+          refreshInbox(),
+          refreshDeadlines(),
+          refreshNotifications(),
+        ]);
+      } catch (error) {
+        setOwnerToken("");
+        const message = error?.status === 401 ? t.unlockWrong : t.error;
+        setUnlockError(message);
+        showToast(message, "bad");
+      } finally {
+        setUnlocking(false);
+      }
+    },
+    [
+      language,
+      refreshBrief,
+      refreshDeadlines,
+      refreshInbox,
+      refreshNotifications,
+      showToast,
+      t.error,
+      t.unlockWrong,
+      t.unlocked,
+      unlock,
+    ],
+  );
+
   const handleRefresh = useCallback(async () => {
     await Promise.allSettled([
       refreshConfig(),
@@ -748,21 +794,28 @@ export default function App() {
               <span className="flag-icon">
                 <ShieldIcon size={17} />
               </span>
-              <div>
-                <strong>{language === "hi" ? "Spark लॉक है" : "Spark is locked"}</strong>
-                <p>
-                  {language === "hi"
-                    ? "अपना इनबॉक्स खोलने के लिए .env वाला owner token डालें। यह इसी ब्राउज़र में रहता है।"
-                    : "Add the owner token from your .env file to unlock your inbox. It stays in this browser."}
-                </p>
+              <div className="lock-copy">
+                <strong>{t.unlockTitle}</strong>
+                <p>{t.unlockSub}</p>
+                <form className="lock-form" onSubmit={handleUnlock}>
+                  <input
+                    type="password"
+                    value={unlock}
+                    onChange={(event) => setUnlock(event.target.value)}
+                    placeholder={t.ownerTokenPlaceholder}
+                    aria-label={t.accessPassword}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="submit"
+                    className="btn primary"
+                    disabled={unlocking || !unlock.trim()}
+                  >
+                    {unlocking ? t.unlocking : t.unlock}
+                  </button>
+                </form>
+                {unlockError && <p className="lock-error">{unlockError}</p>}
               </div>
-              <button
-                type="button"
-                className="btn subtle"
-                onClick={() => handleNavigate("settings")}
-              >
-                {language === "hi" ? "सेटिंग खोलें" : "Open Settings"}
-              </button>
             </div>
           )}
           {view === "today" && (

@@ -227,7 +227,7 @@ async function analyze() {
     });
     if (!response.ok) {
       throw new Error(
-        `${response.error}. Check the backend URL and owner token under Settings.`,
+        `${response.error}. Check the backend URL and access password under Settings.`,
       );
     }
     state.analysis = response.data;

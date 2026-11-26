@@ -16,7 +16,7 @@ records the final submission in its audit log.
 3. Choose **Load unpacked** and select this `extension/` folder.
 4. Open the extension, expand **Settings**, and set:
    - **Spark backend URL** — `http://localhost:8000` locally, or your HTTPS URL.
-   - **Owner token** — the same value as `SPARK_OWNER_TOKEN`, if you set one.
+   - **Access password** — the same value as `SPARK_OWNER_TOKEN` (default `spark123` locally).
 5. Click **Test connection**. It calls the owner-protected config endpoint, so
    it only succeeds when the URL and token are both correct.
 
