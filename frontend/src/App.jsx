@@ -347,32 +347,29 @@ export default function App() {
       if (navigate) setView("chat");
       setThinking(true);
       try {
-        const result = await api.post("/api/chat", { message: trimmed, language });
-        mergeActions(result.cards || []);
-        if (result.cards?.length) {
-          setPending((prev) => {
-            const seen = new Set(prev.map((action) => action.id));
-            const fresh = result.cards.filter(
-              (action) => action.status === "pending" && !seen.has(action.id),
-            );
-            return [...fresh, ...prev];
-          });
+        // Streamed reply: first token arrives as soon as the LLM starts, so the
+        // perceived latency stays in the low seconds even on slow providers.
+        let reply = "";
+        for await (const chunk of api.streamChat({ message: trimmed, language })) {
+          reply = chunk;
         }
+        mergeActions([]);
         const assistantMessage = {
           id: nextId("assistant"),
           role: "assistant",
-          text: result.reply,
-          language: result.language || language,
-          cardIds: (result.cards || []).map((card) => card.id),
-          sources: result.sources || [],
-          flags: result.flags || [],
+          text: reply,
+          language,
+          cardIds: [],
+          sources: [],
+          flags: [],
         };
         setMessages((prev) => [...prev, assistantMessage]);
         refreshAudit();
         refreshNotifications();
+        refreshActions();
         // Spark always answers out loud (speech + text), even when the user
         // did not explicitly ask for a voice reply.
-        speak(result.reply, result.language || language);
+        speak(reply, language);
       } catch {
         setMessages((prev) => [
           ...prev,
@@ -388,7 +385,7 @@ export default function App() {
         setThinking(false);
       }
     },
-    [language, mergeActions, refreshAudit, refreshNotifications, speak, t.error, thinking],
+    [language, mergeActions, refreshActions, refreshAudit, refreshNotifications, speak, t.error, thinking],
   );
 
   const handleScan = useCallback(async () => {

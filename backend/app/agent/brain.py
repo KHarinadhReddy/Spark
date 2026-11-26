@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Iterator
 
 from ..config import Settings
 from ..core.approval import Action, ApprovalGate
@@ -13,7 +13,7 @@ from ..core.store import Message, StoredDeadline, UnifiedStore
 from ..mcp.registry import Registry
 from .deadlines import Deadline as LegacyDeadline
 from .deadlines import find_deadlines, format_date, humanize_days, plus_minutes
-from .llm_client import LLMClient
+from .llm_client import LLMClient, _parse_json
 from .spark import ChatResult, SparkAgent, _detect_language, _pick, _short_title
 
 
@@ -270,6 +270,74 @@ class SparkBrain:
             detail={"provider": self.llm.provider, "cards": len(result.cards), "tools": len(facts)},
         )
         return result
+
+    def stream_reply(
+        self,
+        message: str,
+        language: str | None = None,
+        *,
+        now: datetime | None = None,
+    ) -> Iterator[str]:
+        """Stream assistant reply text deltas as the LLM generates them."""
+        text = (message or "").strip()
+        if not text:
+            fallback = self.fallback.handle(text, language, now=now)
+            yield fallback.reply
+            return
+        lang = language if language in {"en", "hi"} else _detect_language(text)
+        now = now or self.fallback.now()
+        user_flags = scan_user_request(text)
+        if user_flags or not self.configured:
+            fallback = self.fallback.handle(text, language, now=now)
+            yield fallback.reply
+            return
+        self.store.add_turn("user", text, {"language": lang})
+        history = self.store.history(limit=14)
+        messages = [
+            {"role": turn["role"], "content": turn["content"]}
+            for turn in history
+            if turn["role"] in {"user", "assistant"}
+        ]
+        if not messages or messages[-1]["content"] != text:
+            messages.append({"role": "user", "content": text})
+        profile = self.store.get_profile()
+        sources = self._source_summary()
+        system = SYSTEM.format(
+            today=now.date().isoformat(),
+            weekday=now.strftime("%A"),
+            timezone=self.settings.timezone,
+            name=profile.get("name") or "the student",
+            sources=sources,
+            language_name="Hindi (Devanagari)" if lang == "hi" else "English",
+            tools=json.dumps(
+                {
+                    name: {
+                        "description": spec.get("description") or "",
+                        "args": spec.get("args") or {},
+                    }
+                    for name, spec in TOOLS.items()
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
+        collected: list[str] = []
+        reply = ""
+        llm_stream = self.llm.stream_complete(
+            system=system,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=900,
+        )
+        for chunk in llm_stream:
+            collected.append(chunk)
+            yield chunk
+        parsed = _parse_json("".join(collected))
+        reply = str(parsed.get("reply") or "").strip() if parsed else ""
+        if not reply:
+            fallback = self.fallback.handle(text, language, now=now)
+            reply = fallback.reply
+        yield reply
 
     # ------------------------------------------------------------------ tools
     def _run_tool(

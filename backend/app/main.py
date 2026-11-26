@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 import threading
@@ -9,7 +10,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agent.brain import SparkBrain
@@ -402,6 +403,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=500,
                 detail="Spark hit a snag handling that request. Please try again.",
             ) from exc
+
+    @app.post("/api/chat/stream")
+    async def chat_stream(payload: ChatIn) -> StreamingResponse:
+        """SSE stream of the assistant reply — first token arrives fast."""
+
+        def event_stream():
+            reply_iter = container.brain.stream_reply(payload.message, payload.language)
+            final_reply = ""
+            for chunk in reply_iter:
+                final_reply = chunk
+                yield f"event: delta\ndata: {json.dumps({'text': chunk})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'reply': final_reply})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     @app.get("/api/brief")
     def brief(language: Language = "en") -> dict[str, Any]:

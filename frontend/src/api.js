@@ -83,4 +83,44 @@ export const api = {
     });
     return parse(response);
   },
+  async *streamChat(payload) {
+    const token = getOwnerToken();
+    const response = await fetch(base + "/api/chat/stream", {
+      method: "POST",
+      headers: {
+        ...(token ? { "x-spark-token": token } : {}),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const type = response.headers.get("content-type") || "";
+      const body = type.includes("application/json") ? await response.json() : await response.text();
+      const detail = body && typeof body === "object" ? body.detail || body.message : body;
+      throw new Error(detail || `Stream failed (${response.status})`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalReply = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const raw of events) {
+        const line = (raw || "").trim();
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.text) yield data.text;
+          if (data.reply) finalReply = data.reply;
+        } catch {
+          // ignore malformed keep-alive chunks
+        }
+      }
+    }
+    if (finalReply) yield finalReply;
+  },
 };

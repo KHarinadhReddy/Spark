@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Iterator
 
 import httpx
 
@@ -179,6 +179,128 @@ class LLMClient:
         if not choices:
             raise LLMError("no choices")
         return (choices[0].get("message", {}).get("content") or "").strip()
+
+    def _gemini_stream(
+        self,
+        system: str,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        *,
+        json_mode: bool = False,
+        model: str | None = None,
+    ) -> Iterator[str]:
+        contents = []
+        for message in messages:
+            role = "model" if message.get("role") == "assistant" else "user"
+            contents.append({"role": role, "parts": [{"text": message.get("content", "")}]})
+        payload: dict[str, Any] = {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+        if json_mode:
+            payload["generationConfig"]["responseMimeType"] = "application/json"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model or self.model}:streamGenerateContent?alt=sse"
+        with httpx.Client(timeout=60) as client:
+            with client.stream(
+                "POST",
+                url,
+                headers={"content-type": "application/json"},
+                params={"key": self.settings.gemini_api_key},
+                json=payload,
+            ) as response:
+                if response.status_code >= 400:
+                    raise LLMError(f"LLM {response.status_code}: {response.text[:200]}")
+                for line in response.iter_lines():
+                    line = (line or "").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        chunk = json.loads(line[len("data: ") :])
+                    except Exception:
+                        continue
+                    parts = (chunk.get("candidates") or [{}])[0].get("content") or {}
+                    text = "".join(p.get("text") or "" for p in parts.get("parts") or [])
+                    if text:
+                        yield text
+
+    def _groq_stream(
+        self,
+        system: str,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        *,
+        json_mode: bool = False,
+        model: str | None = None,
+    ) -> Iterator[str]:
+        payload: dict[str, Any] = {
+            "model": model or self.model,
+            "messages": [{"role": "system", "content": system}, *messages],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        with httpx.Client(timeout=60) as client:
+            with client.stream(
+                "POST",
+                GROQ_URL,
+                headers={
+                    "content-type": "application/json",
+                    "authorization": f"Bearer {self.settings.groq_api_key}",
+                },
+                json=payload,
+            ) as response:
+                if response.status_code >= 400:
+                    raise LLMError(f"LLM {response.status_code}: {response.text[:200]}")
+                for line in response.iter_lines():
+                    line = (line or "").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        chunk = json.loads(line[len("data: ") :])
+                    except Exception:
+                        continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    content = delta.get("content") or ""
+                    if content:
+                        yield content
+
+    def stream_complete(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool = False,
+    ) -> Iterator[str]:
+        """Yield text deltas from the first working provider/model."""
+        for provider, model in self.providers:
+            try:
+                if provider == "gemini":
+                    for text in self._gemini_stream(
+                        system, messages, temperature, max_tokens, json_mode=json_mode, model=model
+                    ):
+                        yield text
+                    return
+                if provider == "groq":
+                    for text in self._groq_stream(
+                        system, messages, temperature, max_tokens, json_mode=json_mode, model=model
+                    ):
+                        yield text
+                    return
+            except Exception:
+                continue
 
     @staticmethod
     def _post(
