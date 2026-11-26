@@ -240,15 +240,19 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await Promise.allSettled([
-        refreshConfig(),
-        refreshBrief(language),
-        refreshActions(),
-        refreshAudit(),
-        refreshInbox(),
-        refreshDeadlines(),
-        refreshNotifications(),
-      ]);
+      const cfg = await refreshConfig();
+      if (cancelled) return;
+      // Only pull live data once the lock state is known (unlocked vs locked).
+      if (cfg) {
+        await Promise.allSettled([
+          refreshBrief(language),
+          refreshActions(),
+          refreshAudit(),
+          refreshInbox(),
+          refreshDeadlines(),
+          refreshNotifications(),
+        ]);
+      }
       if (cancelled) return;
       const params = new URLSearchParams(window.location.search);
       if (params.get("google") === "connected") {
@@ -366,7 +370,9 @@ export default function App() {
         setMessages((prev) => [...prev, assistantMessage]);
         refreshAudit();
         refreshNotifications();
-        if (voice) speak(result.reply, result.language || language);
+        // Spark always answers out loud (speech + text), even when the user
+        // did not explicitly ask for a voice reply.
+        speak(result.reply, result.language || language);
       } catch {
         setMessages((prev) => [
           ...prev,
@@ -729,6 +735,36 @@ export default function App() {
   const mode = config?.capabilities?.mode || "demo";
   const profileName = config?.profile?.name || "there";
   const suggestions = useMemo(() => config?.prompts || t.suggestions, [config, t.suggestions]);
+
+  // Full-screen black gate: nothing but the password prompt is visible until
+  // the owner unlocks Spark.
+  if (locked) {
+    return (
+      <div className="lock-screen">
+        <div className="lock-screen-card">
+          <span className="lock-screen-mark">
+            <SparkIcon size={30} />
+          </span>
+          <strong className="lock-screen-title">{t.unlockTitle}</strong>
+          <p className="lock-screen-sub">{t.unlockSub}</p>
+          <form className="lock-form" onSubmit={handleUnlock}>
+            <input
+              type="password"
+              value={unlock}
+              onChange={(event) => setUnlock(event.target.value)}
+              placeholder={t.ownerTokenPlaceholder}
+              aria-label={t.accessPassword}
+              autoComplete="current-password"
+            />
+            <button type="submit" className="btn primary" disabled={unlocking || !unlock.trim()}>
+              {unlocking ? t.unlocking : t.unlock}
+            </button>
+          </form>
+          {unlockError && <p className="lock-error">{unlockError}</p>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">

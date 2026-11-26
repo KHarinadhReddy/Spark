@@ -149,8 +149,9 @@ def classify_message(
         f"Received: {received}\n"
         f"Body:\n{body[:6000]}"
     )
+    prompt_system = _SYSTEM.replace("{today}", now.date().isoformat())
     parsed = llm.complete_json(
-        system=_SYSTEM.format(today=now.date().isoformat()),
+        system=prompt_system,
         messages=[{"role": "user", "content": prompt}],
         schema_hint=(
             '{"category":"deadline|financial|academic|professional|personal|event|newsletter|spam|phishing|other",'
@@ -203,6 +204,8 @@ def classify_message(
         extraction.priority = _priority_for_deadline(
             extraction.deadline.get("due_date", ""), now, extraction.priority
         )
+    if not extraction.is_deadline and extraction.category in {"newsletter", "spam", "phishing"}:
+        extraction.needs_action = False
     return extraction
 
 
@@ -253,7 +256,11 @@ def _heuristic(
         priority = "high"
     if _PROFESSIONAL_SENDERS.search(sender) and priority == "normal":
         priority = "high"
-    needs_action = bool(deadline or _ACTION.search(text))
+    if category in {"newsletter", "spam", "phishing"}:
+        # Newsletters / bulk mail / phishing alerts are informational, never actions.
+        needs_action = False
+    else:
+        needs_action = bool(deadline or _ACTION.search(text))
     summary = _summary(subject, body)
     return Extraction(
         category=category,

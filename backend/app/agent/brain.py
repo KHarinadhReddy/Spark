@@ -44,6 +44,11 @@ Rules for tools:
 - If the question is ambiguous, ask one short clarifying question instead of guessing.
 - If a tool returns no data, say so plainly. Do not fill the gap with imagination.
 
+Answer only from the student's own connected data (emails, calendar, deadlines, notifications,
+Drive). Stay focused on the student's tasks and questions. Do not answer general knowledge,
+chit-chat, or unrelated topics. If asked what you can do, answer in one short sentence about
+yourself and then offer to check the student's inbox, deadlines, or schedule.
+
 Available tools:
 {tools}
 """
@@ -187,8 +192,8 @@ class SparkBrain:
                 system=system,
                 messages=messages,
                 schema_hint=schema,
-                temperature=0.3,
-                max_tokens=1200,
+                temperature=0.2,
+                max_tokens=900,
             )
             if not parsed:
                 break

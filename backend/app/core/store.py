@@ -41,6 +41,26 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").lower()).strip(" .,-–—")
 
 
+_HTML_TAG = re.compile(r"<[^>]+>")
+_HTML_ENT = {
+    "nbsp": " ",
+    "amp": "&",
+    "lt": "<",
+    "gt": ">",
+    "quot": '"',
+    "apos": "'",
+}
+
+
+def strip_html(text: str) -> str:
+    """Collapse HTML / email-mime noise into plain readable text."""
+    cleaned = _HTML_TAG.sub(" ", text or "")
+    cleaned = re.sub(r"&([a-z]+);", lambda m: _HTML_ENT.get(m.group(1).lower(), m.group(0)), cleaned)
+    cleaned = re.sub(r"<[^>]*>", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
 @dataclass(slots=True)
 class Message:
     id: str
@@ -72,7 +92,7 @@ class Message:
             "sender": self.sender,
             "sender_name": self.sender_name,
             "subject": self.subject,
-            "snippet": self.snippet,
+            "snippet": strip_html(self.snippet),
             "received_at": self.received_at,
             "labels": self.labels,
             "category": self.category,
@@ -85,7 +105,7 @@ class Message:
             "archived": self.archived,
         }
         if include_body:
-            payload["body"] = self.body
+            payload["body"] = strip_html(self.body)
         return payload
 
 
@@ -224,8 +244,8 @@ class UnifiedStore:
             "sender": data.get("sender") or data.get("from") or "",
             "sender_name": data.get("sender_name") or data.get("from_name") or "",
             "subject": data.get("subject") or "(no subject)",
-            "snippet": data.get("snippet") or "",
-            "body": data.get("body") or data.get("snippet") or "",
+            "snippet": strip_html(data.get("snippet") or ""),
+            "body": strip_html(data.get("body") or data.get("snippet") or ""),
             "received_at": data.get("received_at") or data.get("date") or now,
             "labels": _json(data.get("labels") or []),
             "category": data.get("category") or "other",

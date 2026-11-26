@@ -12,6 +12,9 @@ from ..config import Settings
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+# Used when the primary Gemini model runs out of quota / degrades.
+GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite-preview"
+
 
 class LLMError(Exception):
     pass
@@ -28,22 +31,18 @@ class LLMClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.provider = settings.llm_provider
-        self.providers = [
-            provider
-            for provider, key in (
-                ("gemini", settings.gemini_api_key),
-                ("groq", settings.groq_api_key),
-            )
-            if key
-        ]
-        if self.provider in self.providers:
-            self.providers.remove(self.provider)
-            self.providers.insert(0, self.provider)
-        self.model = (
-            settings.gemini_model
-            if self.providers and self.providers[0] == "gemini"
-            else settings.groq_model
+        entries: list[tuple[str, str]] = []
+        if settings.gemini_api_key:
+            entries.append(("gemini", settings.gemini_model))
+            entries.append(("gemini", GEMINI_FALLBACK_MODEL))
+        if settings.groq_api_key:
+            entries.append(("groq", settings.groq_model))
+        self.providers = entries
+        primary = (
+            settings.llm_provider if any(p == settings.llm_provider for p, _ in entries) else (entries[0][0] if entries else settings.llm_provider)
         )
+        self.provider = primary
+        self.model = next((m for p, m in entries if p == primary), entries[0][1] if entries else settings.gemini_model)
 
     @property
     def configured(self) -> bool:
@@ -54,7 +53,7 @@ class LLMClient:
             "provider": self.provider,
             "model": self.model,
             "configured": self.configured,
-            "fallbacks": self.providers[1:],
+            "fallbacks": [f for f in self.providers if f != (self.provider, self.model)],
         }
 
     # --------------------------------------------------------------- public API
@@ -75,12 +74,12 @@ class LLMClient:
                 "\n\nReturn ONLY valid JSON. No markdown fences, no commentary. "
                 f"Shape: {schema_hint}"
             )
-        for provider in self.providers:
+        for provider, model in self.providers:
             try:
                 if provider == "gemini":
-                    text = self._gemini(prompt, messages, temperature, max_tokens, json_mode=True)
+                    text = self._gemini(prompt, messages, temperature, max_tokens, json_mode=True, model=model)
                 else:
-                    text = self._groq(prompt, messages, temperature, max_tokens, json_mode=True)
+                    text = self._groq(prompt, messages, temperature, max_tokens, json_mode=True, model=model)
             except Exception:
                 continue
             parsed = _parse_json(text)
@@ -98,12 +97,12 @@ class LLMClient:
     ) -> str | None:
         if not self.configured:
             return None
-        for provider in self.providers:
+        for provider, model in self.providers:
             try:
                 if provider == "gemini":
-                    text = self._gemini(system, messages, temperature, max_tokens, json_mode=False)
+                    text = self._gemini(system, messages, temperature, max_tokens, json_mode=False, model=model)
                 else:
-                    text = self._groq(system, messages, temperature, max_tokens, json_mode=False)
+                    text = self._groq(system, messages, temperature, max_tokens, json_mode=False, model=model)
             except Exception:
                 continue
             if text.strip():
@@ -119,6 +118,7 @@ class LLMClient:
         max_tokens: int,
         *,
         json_mode: bool,
+        model: str | None = None,
     ) -> str:
         contents = []
         for message in messages:
@@ -134,7 +134,7 @@ class LLMClient:
         }
         if json_mode:
             payload["generationConfig"]["responseMimeType"] = "application/json"
-        url = GEMINI_URL.format(model=self.settings.gemini_model)
+        url = GEMINI_URL.format(model=model or self.model)
         data = self._post(
             url,
             headers={"content-type": "application/json"},
@@ -156,9 +156,10 @@ class LLMClient:
         max_tokens: int,
         *,
         json_mode: bool,
+        model: str | None = None,
     ) -> str:
         payload: dict[str, Any] = {
-            "model": self.settings.groq_model,
+            "model": model or self.model,
             "messages": [{"role": "system", "content": system}, *messages],
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -189,21 +190,21 @@ class LLMClient:
         params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         last_error: Exception | None = None
-        for attempt in range(2):
+        for attempt in range(4):
             try:
                 with httpx.Client(timeout=timeout) as client:
                     response = client.post(url, headers=headers, json=payload, params=params)
-                if response.status_code in {429, 500, 502, 503, 504} and attempt == 0:
-                    time.sleep(1.5)
+                if response.status_code in {429, 500, 502, 503, 504}:
+                    backoff = 2.0 * (2 ** attempt) + 1.0
+                    time.sleep(backoff)
+                    last_error = LLMError(f"LLM {response.status_code}: {response.text[:200]}")
                     continue
                 if response.status_code >= 400:
                     raise LLMError(f"LLM {response.status_code}: {response.text[:200]}")
                 return response.json()
-            except Exception as exc:  # retry once on transport errors
+            except Exception as exc:  # retry with backoff on transport errors
                 last_error = exc
-                if attempt == 0:
-                    time.sleep(1.0)
-                    continue
+                time.sleep(2.0 * (2 ** attempt) + 1.0)
         raise LLMError(str(last_error) if last_error else "LLM request failed")
 
 

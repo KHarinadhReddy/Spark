@@ -342,7 +342,8 @@ def test_llm_falls_back_from_gemini_to_groq(settings, monkeypatch):
     from app.agent.llm_client import LLMClient
 
     llm = LLMClient(settings)
-    assert llm.providers == ["gemini", "groq"]
+    assert ("gemini", llm.model) in llm.providers
+    assert ("groq", "llama-3.3-70b-versatile") in llm.providers
 
     def unavailable(*_args, **_kwargs):
         raise RuntimeError("gemini unavailable")
@@ -359,7 +360,10 @@ def test_llm_falls_back_from_gemini_to_groq(settings, monkeypatch):
         schema_hint='{"reply": "..."}',
     )
     assert parsed == {"reply": "fallback works", "tool_calls": []}
-    assert llm.status()["fallbacks"] == ["groq"]
+    assert llm.status()["fallbacks"] == [
+        ("gemini", "gemini-3.1-flash-lite-preview"),
+        ("groq", "llama-3.3-70b-versatile"),
+    ]
 
 
 def test_owner_token_locks_api_but_not_devices(settings):
