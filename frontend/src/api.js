@@ -110,10 +110,19 @@ export const api = {
       const events = buffer.split("\n\n");
       buffer = events.pop() || "";
       for (const raw of events) {
-        const line = (raw || "").trim();
-        if (!line.startsWith("data: ")) continue;
+        const text = (raw || "").trim();
+        if (!text) continue;
+        let dataLine = null;
+        for (const line of text.split("\n")) {
+          const l = line.trim();
+          if (l.startsWith("data: ")) {
+            dataLine = l.slice(6).trim();
+            break;
+          }
+        }
+        if (!dataLine) continue;
         try {
-          const data = JSON.parse(line.slice(6));
+          const data = JSON.parse(dataLine);
           if (data.text) yield data.text;
           if (data.reply) finalReply = data.reply;
         } catch {
