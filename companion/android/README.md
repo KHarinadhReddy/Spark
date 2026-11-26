@@ -29,17 +29,44 @@ cd companion/android
 .\gradlew.bat assembleDebug    # Windows PowerShell
 ```
 
-The APK lands at `app/build/outputs/apk/debug/app-debug.apk`. Install it with
-`adb install -r app/build/outputs/apk/debug/app-debug.apk`, or open the project
-in Android Studio and press Run.
+The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk`. Install it
+with `adb install -r app/build/outputs/apk/debug/app-debug.apk`, or open the
+project in Android Studio and press Run.
 
-Debug builds allow cleartext HTTP so you can test against
-`http://10.0.2.2:8000` from the emulator. Release builds use Android's default
-HTTPS-only policy.
+### Signed release build
 
-The checked-in Gradle wrapper pins Gradle 9.6.0; AGP 9.4.1 and compileSdk 37
-match current Android Studio. If your SDK is older, install SDK Platform 37 or
-lower `compileSdk`/`targetSdk` in `app/build.gradle.kts`.
+The installable build on the phone should be a release APK. Create a local
+keystore once (never commit it):
+
+```bash
+keytool -genkeypair -v -keystore spark-release.keystore -alias spark \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -dname "CN=Spark Companion, O=Spark, C=IN"
+```
+
+Create `companion/android/keystore.properties` (gitignored):
+
+```properties
+storeFile=spark-release.keystore
+storePassword=...
+keyAlias=spark
+keyPassword=...
+```
+
+Then build:
+
+```bash
+.\gradlew.bat assembleRelease
+```
+
+The signed APK lands at
+`app/build/outputs/apk/release/app-release.apk`. `targetSdk` is 36, matching
+Android 16, while `compileSdk` stays on 37.
+
+Both debug and release builds allow cleartext HTTP so the phone can reach a
+LAN backend such as `http://10.10.35.232:8000`. Keep the backend on HTTPS for
+a public deployment, and rotate the access password before exposing it.
+
 
 ## Pair it
 
@@ -47,15 +74,29 @@ lower `compileSdk`/`targetSdk` in `app/build.gradle.kts`.
 2. Name the phone and press **Pair a device**.
 3. Copy the device token (shown once).
 4. Install the APK, open **Spark Companion**, and enter:
-   - **Backend URL** — e.g. `https://spark.example.com` (must be HTTPS for a
-     public deployment; `http://10.0.2.2:8000` works from the emulator against
-     a local backend).
+   - **Backend URL** — e.g. `http://10.10.35.232:8000` on the same Wi-Fi, or
+     `https://spark.example.com` for a public deployment.
    - **Device token** — the token from step 3.
 5. Press **Save**, then **Test connection**. It calls `/api/companion/me` and
    only succeeds when the token is valid.
 6. Press **Open notification access**, find **Spark Companion**, and allow it.
 7. Send yourself a WhatsApp message. It should appear in Spark's Inbox within a
    few seconds.
+
+### Installing on Android 16 / ColorOS
+
+WhatsApp refuses `.apk` attachments. Send a ZIP containing the APK instead,
+then extract it on the phone with File Manager. On Oppo/ColorOS phones:
+
+1. Allow **Install unknown apps** for Files/Chrome/WhatsApp
+   (Settings → Security & privacy → Install unknown apps).
+2. Turn off **Pure Mode** (Settings search → “Pure Mode”). It blocks every
+   sideloaded app until disabled.
+3. If Play Protect warns about an unknown developer, choose
+   **More details → Install anyway**.
+4. Uninstall any earlier Spark Companion first — a different signing key
+   cannot upgrade over it.
+
 
 If the backend has an owner token, pairing already requires it; the companion
 itself only uses the device token. Revoke a lost phone from **Settings → Paired
@@ -80,7 +121,9 @@ devices** (or `DELETE /api/companion/devices/{id}`).
 | No messages arrive | Notification access is off, or battery optimisation killed the listener |
 | Works on Wi-Fi only | Use the public HTTPS URL, not `localhost` |
 | Duplicate entries | Spark de-duplicates by notification content + timestamp; near-identical reposts can still appear |
-| `Cleartext HTTP not permitted` | You are running a release build or a non-local URL over HTTP; use HTTPS (debug builds allow local HTTP) |
+| `App not installed` | Uninstall any older Spark Companion (different signature), then retry |
+| ColorOS blocks the install | Turn off **Pure Mode** and allow **Install unknown apps** for the file manager |
+| `Cleartext HTTP not permitted` | Use `http://` only for the debug/LAN setup; public deployments need HTTPS |
 
 ## Files
 

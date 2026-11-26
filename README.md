@@ -229,14 +229,18 @@ See **[companion/android/README.md](companion/android/README.md)**.
 
 ```bash
 cd companion/android
-./gradlew assembleDebug        # Windows: .\gradlew.bat assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+.\gradlew.bat assembleRelease    # signed release APK
+adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
 1. In Spark: **Settings → WhatsApp companion → Pair a device**.
 2. Paste the backend URL and one-time device token into the app.
 3. Grant **Notification access** to Spark Companion.
 4. Send a WhatsApp message; it appears in Spark's Inbox within seconds.
+
+WhatsApp cannot attach `.apk` files. To move the app through WhatsApp, put the
+APK in a ZIP, send the ZIP, and extract it on the phone. On Oppo/ColorOS phones,
+also turn off **Pure Mode** and allow **Install unknown apps** before installing.
 
 The companion forwards notification text only. It cannot read old chats and
 cannot send messages. WhatsApp chat exports can be imported separately from

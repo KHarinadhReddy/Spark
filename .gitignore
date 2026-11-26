@@ -51,6 +51,7 @@ local.properties
 captures/
 *.jks
 *.keystore
+keystore.properties
 
 # Spark backups (contain personal data)
 backups/
