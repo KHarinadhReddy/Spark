@@ -177,7 +177,17 @@ class SparkBrain:
             name=profile.get("name") or "the student",
             sources=sources,
             language_name="Hindi (Devanagari)" if lang == "hi" else "English",
-            tools=json.dumps(TOOLS, ensure_ascii=False, indent=2),
+            tools=json.dumps(
+                {
+                    name: {
+                        "description": spec.get("description") or "",
+                        "args": spec.get("args") or {},
+                    }
+                    for name, spec in TOOLS.items()
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
         )
         schema = '{"reply":"...","tool_calls":[{"name":"...","args":{}}]}'
 
